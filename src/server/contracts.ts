@@ -58,6 +58,8 @@ export interface FileMetadataResponse {
 }
 
 export interface ApplicationStatus {
+  /** Display-safe basename of the configured root; never an absolute local path. */
+  readonly sourceRootLabel: string;
   readonly startup: StartupState;
   readonly discovery?: DiscoveryProgress;
   readonly indexing?: IndexingProgress;

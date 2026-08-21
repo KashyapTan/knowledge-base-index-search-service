@@ -97,6 +97,7 @@ describe("Plan 7 Bun API", () => {
 
     const status = await fetch(new URL(`${API_PREFIX}/status`, server.url));
     expect(await status.json()).toMatchObject({
+      sourceRootLabel: "root",
       startup: { phase: "ready" },
       searchAvailable: true,
     });

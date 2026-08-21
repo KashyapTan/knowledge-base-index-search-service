@@ -184,6 +184,7 @@ export class FixtureSearch implements SearchService {
   calls = 0;
   delay = false;
   nextError: SearchError | undefined;
+  responseFactory: ((request: SearchRequest) => SearchResponse) | undefined;
 
   async search(
     request: SearchRequest,
@@ -200,6 +201,7 @@ export class FixtureSearch implements SearchService {
       return err({ code: "SEARCH_CANCELLED" as const, message: "Search was cancelled." });
     }
     if (this.nextError) return err(this.nextError);
+    if (this.responseFactory) return ok(this.responseFactory(request));
     return ok({
       query: request.query.trim(),
       requestedFileCount: request.fileCount ?? 10,

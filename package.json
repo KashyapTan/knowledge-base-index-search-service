@@ -17,6 +17,8 @@
     "model:setup": "\"$npm_execpath\" run scripts/setup-model.ts",
     "format": "biome format --write .",
     "test": "\"$npm_execpath\" test",
+    "test:ui": "\"$npm_execpath\" test src/ui",
+    "test:e2e": "playwright test",
     "test:coverage": "\"$npm_execpath\" test --coverage --coverage-reporter=text",
     "compat": "\"$npm_execpath\" run build:ui && \"$npm_execpath\" run scripts/compatibility-check.ts"
   },
@@ -29,10 +31,14 @@
   },
   "devDependencies": {
     "@biomejs/biome": "2.5.9",
+    "@happy-dom/global-registrator": "20.11.6",
+    "@playwright/test": "1.62.1",
+    "@testing-library/react": "16.3.2",
     "@types/bun": "1.4.0",
     "@types/react": "19.2.18",
     "@types/react-dom": "19.2.4",
     "@vitejs/plugin-react": "6.1.0",
+    "happy-dom": "20.11.6",
     "typescript": "7.0.2",
     "vite": "8.2.2"
   },

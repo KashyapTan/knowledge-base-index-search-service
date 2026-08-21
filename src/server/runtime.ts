@@ -1,3 +1,4 @@
+import { basename } from "node:path";
 import { AutoTokenizer } from "@huggingface/transformers";
 import type { AppConfig, StartupIssue, StartupStateStore } from "../config/index.ts";
 import { createDiscoveryService, type FileChange } from "../discovery/index.ts";
@@ -209,6 +210,7 @@ export class ApplicationRuntime {
 
   status(): ApplicationStatus {
     return {
+      sourceRootLabel: basename(this.config.sourceRoots[0].path) || "Configured source",
       startup: this.state.getSnapshot(),
       ...(this.#discoveryProgress ? { discovery: this.#discoveryProgress } : {}),
       ...(this.#indexingProgress ? { indexing: this.#indexingProgress } : {}),
@@ -239,6 +241,7 @@ export class ApplicationRuntime {
       this.config.sourceRoots[0],
       created.value.discovery.manifest,
     );
+    this.events.publish({ type: "snapshot", status: this.status() });
     const { discovery, indexing } = created.value;
     this.#unsubscribers.push(
       discovery.scanner.subscribeProgress((progress) => {
