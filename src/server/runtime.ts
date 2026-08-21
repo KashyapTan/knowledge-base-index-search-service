@@ -30,6 +30,7 @@ import type {
   ApplicationServices,
   ApplicationServicesFactory,
   ApplicationStatus,
+  OpenFileChange,
 } from "./contracts.ts";
 import { SafeFileAccess } from "./file-access.ts";
 import { ApplicationEventHub } from "./progress.ts";
@@ -256,7 +257,24 @@ export class ApplicationRuntime {
     let acceptingChanges = false;
     this.#unsubscribers.push(
       discovery.manifest.subscribe((changes) => {
-        if (acceptingChanges) this.#enqueueChanges(changes);
+        if (!acceptingChanges) return;
+        const notifications: OpenFileChange[] = [];
+        for (const change of changes) {
+          if (change.kind === "deleted") {
+            notifications.push({ fileId: change.fileId, kind: "deleted" });
+          }
+          if (
+            change.kind === "content-changed" ||
+            change.kind === "metadata-only" ||
+            change.kind === "failed"
+          ) {
+            notifications.push({ fileId: change.fileId, kind: "changed" });
+          }
+        }
+        if (notifications.length > 0) {
+          this.events.publish({ type: "files", changes: notifications });
+        }
+        this.#enqueueChanges(changes);
       }),
     );
 

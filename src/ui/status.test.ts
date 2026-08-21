@@ -26,6 +26,12 @@ describe("UI application status", () => {
       applyApplicationEvent(undefined, { type: "startup", startup: ready.startup }),
     ).toBeUndefined();
     expect(applyApplicationEvent(undefined, { type: "snapshot", status: ready })).toBe(ready);
+    expect(
+      applyApplicationEvent(ready, {
+        type: "files",
+        changes: [{ fileId: "a".repeat(64), kind: "changed" }],
+      }),
+    ).toBe(ready);
 
     const loading = { phase: "loading_model", changedAt: 2, issues: [] } as const;
     expect(applyApplicationEvent(ready, { type: "startup", startup: loading })?.startup).toBe(

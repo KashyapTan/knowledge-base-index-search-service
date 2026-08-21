@@ -92,6 +92,9 @@ class FakeApi implements KbissApi {
     (request: SearchRequest, signal: AbortSignal) => Promise<SearchResponse>
   > = [];
   fileMetadata: FileMetadataResponse | undefined;
+  fileContent = "# Gateway\nSet timeout_ms before retrying.\n";
+  contentError: Error | undefined;
+  contentCalls = 0;
   eventListener: ((event: ApplicationEventData) => void) | undefined;
   connectionListener: ((message: string) => void) | undefined;
   closed = false;
@@ -108,8 +111,24 @@ class FakeApi implements KbissApi {
   }
 
   async getFileMetadata(_fileId: string, _signal: AbortSignal): Promise<FileMetadataResponse> {
-    if (!this.fileMetadata) throw new Error("File metadata is unavailable.");
-    return this.fileMetadata;
+    return (
+      this.fileMetadata ?? {
+        fileId: _fileId,
+        relativePath: "fixture.md",
+        filename: "fixture.md",
+        format: "markdown",
+        mimeFamily: "text/markdown",
+        size: this.fileContent.length,
+        modifiedAtMs: 1,
+        readStatus: "ready",
+      }
+    );
+  }
+
+  async getFileContent(_fileId: string, _signal: AbortSignal): Promise<string> {
+    this.contentCalls += 1;
+    if (this.contentError) throw this.contentError;
+    return this.fileContent;
   }
 
   subscribe(
@@ -324,17 +343,17 @@ describe("Plan 08 React search experience", () => {
     routed.searchParams.set("line", "80");
     window.history.replaceState({}, "", routed);
     fireEvent.popState(window);
-    const routedViewer = screen.getByRole("complementary", { name: "Selected file" });
+    const routedViewer = screen.getByRole("dialog", { name: "client.ts" });
     expect(within(routedViewer).getByText("client.ts")).toBeTruthy();
-    fireEvent.click(within(routedViewer).getByRole("button", { name: "Close selection" }));
+    fireEvent.click(within(routedViewer).getByRole("button", { name: "Close viewer" }));
 
     fireEvent.click(firstOpen);
-    const viewer = screen.getByRole("complementary", { name: "Selected file" });
+    const viewer = screen.getByRole("dialog", { name: "gateway.md" });
     expect(within(viewer).getByText("gateway.md")).toBeTruthy();
-    expect(within(viewer).getByText(/opening near line 4/)).toBeTruthy();
+    expect(within(viewer).getByText(/line 4/)).toBeTruthy();
     expect(new URL(window.location.href).searchParams.get("file")).toBe("a".repeat(64));
-    fireEvent.click(within(viewer).getByRole("button", { name: "Close selection" }));
-    expect(screen.queryByRole("complementary", { name: "Selected file" })).toBeNull();
+    fireEvent.click(within(viewer).getByRole("button", { name: "Close viewer" }));
+    expect(screen.queryByRole("dialog", { name: "gateway.md" })).toBeNull();
   });
 
   test("keeps useful results during refresh and distinguishes no-results and error states", async () => {
@@ -402,11 +421,178 @@ describe("Plan 08 React search experience", () => {
       readStatus: "ready",
     };
     await renderReady(api);
-    const viewer = screen.getByRole("complementary", { name: "Selected file" });
+    const viewer = screen.getByRole("dialog", { name: "guide.md" });
     expect(await within(viewer).findByText("guide.md")).toBeTruthy();
     expect(within(viewer).getByText("deep/linked/guide.md")).toBeTruthy();
-    expect(within(viewer).getByText(/opening near line 17/)).toBeTruthy();
+    expect(within(viewer).getByText(/line 17/)).toBeTruthy();
     expect(new URL(window.location.href).searchParams.get("file")).toBe(fileId);
+  });
+
+  test("traps and restores focus, closes on Escape, and copies only the relative path", async () => {
+    const api = new FakeApi();
+    const item = result("d".repeat(64), "guide.md", "safe/guide.md");
+    api.searchHandlers.push(async () => response("guide", [item]));
+    const writes: string[] = [];
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText: async (value: string) => writes.push(value) },
+    });
+    const { input } = await renderReady(api);
+    fireEvent.change(input, { target: { value: "guide" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    const open = await screen.findByRole("button", { name: "Open full file" });
+    fireEvent.click(open);
+    const dialog = screen.getByRole("dialog", { name: "guide.md" });
+    expect(document.activeElement).toBe(
+      within(dialog).getByRole("button", { name: "Close viewer" }),
+    );
+    fireEvent.click(within(dialog).getByRole("button", { name: "Copy path" }));
+    await waitFor(() => expect(writes).toEqual(["safe/guide.md"]));
+
+    const focusable = [
+      ...dialog.querySelectorAll<HTMLElement>("button:not([disabled]),input:not([disabled])"),
+    ];
+    const last = focusable.at(-1);
+    if (!last) throw new Error("Expected viewer controls.");
+    last.focus();
+    fireEvent.keyDown(document, { key: "Tab" });
+    expect(document.activeElement).toBe(within(dialog).getByRole("button", { name: "Copy path" }));
+    fireEvent.keyDown(window, { key: "/" });
+    expect(document.activeElement).not.toBe(input);
+    fireEvent.keyDown(document, { key: "Tab", shiftKey: true });
+    expect(document.activeElement).toBe(last);
+
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(screen.queryByRole("dialog", { name: "guide.md" })).toBeNull();
+    expect(document.activeElement).toBe(open);
+  });
+
+  test("searches complete source, supports toggles and shortcuts, and highlights the active match", async () => {
+    const api = new FakeApi();
+    api.fileContent = "# Search\ntimeout_ms first\nTIMEOUT_MS second\nend\n";
+    const item = result("e".repeat(64), "search.md", "docs/search.md");
+    api.searchHandlers.push(async () => response("search", [item]));
+    const { input } = await renderReady(api);
+    fireEvent.change(input, { target: { value: "search" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    fireEvent.click(await screen.findByRole("button", { name: "Open full file" }));
+    const dialog = screen.getByRole("dialog", { name: "search.md" });
+    const find = within(dialog).getByRole("searchbox", { name: "Find in file" });
+    fireEvent.change(find, { target: { value: "timeout_ms" } });
+    await within(dialog).findByText("2 of 2");
+    expect(dialog.querySelectorAll(".markdown-preview mark")).toHaveLength(2);
+
+    fireEvent.keyDown(find, { key: "Enter" });
+    expect(
+      within(dialog).getByRole("button", { name: "Source" }).getAttribute("aria-pressed"),
+    ).toBe("true");
+    await waitFor(() => expect(dialog.querySelectorAll("mark.active-match")).toHaveLength(1));
+    expect(within(dialog).getByText("1 of 2")).toBeTruthy();
+    fireEvent.keyDown(find, { key: "Enter", shiftKey: true });
+    expect(within(dialog).getByText("2 of 2")).toBeTruthy();
+
+    fireEvent.click(within(dialog).getByTitle("Case sensitive"));
+    await within(dialog).findByText("1 of 1");
+    fireEvent.click(within(dialog).getByTitle("Regular expression"));
+    fireEvent.change(find, { target: { value: "[" } });
+    await within(dialog).findByText("The regular expression is invalid.");
+  });
+
+  test("switches HTML preview/source with an inert iframe and reports changed or deleted files", async () => {
+    const api = new FakeApi();
+    api.fileContent = `<h1>Safe</h1><script>parent.pwned=true</script><img src="https://bad/pixel"><a href="javascript:alert(1)">bad</a><a href="https://example.com/guide">safe guide</a>`;
+    const item = {
+      ...result("f".repeat(64), "unsafe.html", "fixtures/unsafe.html"),
+      format: "html",
+    };
+    api.fileMetadata = {
+      fileId: item.fileId,
+      relativePath: item.relativePath,
+      filename: item.filename,
+      format: "html",
+      mimeFamily: "text/html",
+      size: api.fileContent.length,
+      modifiedAtMs: 1,
+      readStatus: "ready",
+    };
+    api.searchHandlers.push(async () => response("unsafe", [item]));
+    const { input } = await renderReady(api);
+    fireEvent.change(input, { target: { value: "unsafe" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    fireEvent.click(await screen.findByRole("button", { name: "Open full file" }));
+    const dialog = screen.getByRole("dialog", { name: "unsafe.html" });
+    const frame = await within(dialog).findByTitle("Sandboxed HTML preview");
+    expect(frame.getAttribute("sandbox")).toBe("");
+    expect(frame.getAttribute("srcdoc")).toContain("default-src 'none'");
+    expect(frame.getAttribute("srcdoc")).not.toContain("<script");
+    expect(frame.getAttribute("srcdoc")).not.toContain("https://bad");
+    expect(within(dialog).getByRole("link", { name: "safe guide" }).getAttribute("target")).toBe(
+      "_blank",
+    );
+    fireEvent.click(within(dialog).getByRole("button", { name: "Source" }));
+    expect(await within(dialog).findByTestId("source-scroller")).toBeTruthy();
+
+    act(() => api.emit({ type: "files", changes: [{ fileId: item.fileId, kind: "changed" }] }));
+    expect(await within(dialog).findByText(/changed while it was open/)).toBeTruthy();
+    fireEvent.click(within(dialog).getByRole("button", { name: "Refresh file" }));
+    await waitFor(() => expect(api.contentCalls).toBe(2));
+    api.contentError = new Error("Refresh could not read the file.");
+    act(() => api.emit({ type: "files", changes: [{ fileId: item.fileId, kind: "changed" }] }));
+    fireEvent.click(await within(dialog).findByRole("button", { name: "Refresh file" }));
+    expect(await within(dialog).findByText(/previously loaded copy is still shown/)).toBeTruthy();
+    expect(within(dialog).getByTitle("Sandboxed HTML preview")).toBeTruthy();
+    act(() => api.emit({ type: "files", changes: [{ fileId: item.fileId, kind: "deleted" }] }));
+    expect(await within(dialog).findByText(/removed while it was open/)).toBeTruthy();
+  });
+
+  test("bounds the rendered DOM for very large text files", async () => {
+    const api = new FakeApi();
+    api.fileContent = Array.from({ length: 20_000 }, (_, index) => `line ${index + 1}`).join("\n");
+    const item = { ...result("9".repeat(64), "huge.log", "logs/huge.log"), format: "text" };
+    api.fileMetadata = {
+      fileId: item.fileId,
+      relativePath: item.relativePath,
+      filename: item.filename,
+      format: "text",
+      mimeFamily: "text/plain",
+      size: api.fileContent.length,
+      modifiedAtMs: 1,
+      readStatus: "ready",
+    };
+    api.searchHandlers.push(async () => response("huge", [item]));
+    const { input } = await renderReady(api);
+    fireEvent.change(input, { target: { value: "huge" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    fireEvent.click(await screen.findByRole("button", { name: "Open full file" }));
+    const scroller = await screen.findByTestId("source-scroller");
+    expect(scroller.querySelectorAll("li").length).toBeLessThan(150);
+    Object.defineProperty(scroller, "clientHeight", { configurable: true, value: 800 });
+    scroller.scrollTop = 2_400;
+    fireEvent.scroll(scroller);
+    await waitFor(() =>
+      expect(Number(scroller.querySelector("li")?.dataset.line ?? 0)).toBeGreaterThan(1),
+    );
+  });
+
+  test("shows display-safe file and clipboard failures", async () => {
+    const api = new FakeApi();
+    const item = result("8".repeat(64), "failure.md", "safe/failure.md");
+    api.contentError = new Error("The requested file no longer exists.");
+    api.searchHandlers.push(async () => response("failure", [item]));
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText: async () => Promise.reject(new Error("denied")) },
+    });
+    const { input } = await renderReady(api);
+    fireEvent.change(input, { target: { value: "failure" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    fireEvent.click(await screen.findByRole("button", { name: "Open full file" }));
+    const dialog = screen.getByRole("dialog", { name: "failure.md" });
+    expect((await within(dialog).findByRole("alert")).textContent).toContain(
+      "The requested file no longer exists.",
+    );
+    fireEvent.click(within(dialog).getByRole("button", { name: "Copy path" }));
+    expect(await within(dialog).findByText("The relative path could not be copied.")).toBeTruthy();
   });
 
   test("shows a display-safe status failure while retaining an operable search field", async () => {

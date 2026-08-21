@@ -70,11 +70,17 @@ export interface ApplicationStatus {
   readonly csrfToken: string;
 }
 
+export interface OpenFileChange {
+  readonly fileId: string;
+  readonly kind: "changed" | "deleted";
+}
+
 export type ApplicationEventData =
   | { readonly type: "snapshot"; readonly status: ApplicationStatus }
   | { readonly type: "startup"; readonly startup: StartupState }
   | { readonly type: "discovery"; readonly progress: DiscoveryProgress }
   | { readonly type: "indexing"; readonly progress: IndexingProgress }
+  | { readonly type: "files"; readonly changes: readonly OpenFileChange[] }
   | { readonly type: "issue"; readonly issue: StartupIssue };
 
 export interface SequencedApplicationEvent {

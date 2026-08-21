@@ -79,3 +79,32 @@ Target approximately 93% line and function coverage for non-trivial viewer state
 ## Handoff
 
 Plan 10 turns the integrated product into a dependable teammate-facing local command with model setup, state operations, documentation, and production polish.
+
+## Completion notes (2026-08-21)
+
+- Replaced the Plan 8 viewer host with a full-height accessible modal using opaque-ID-only metadata
+  and content reads, focus trap/restoration, Escape and browser-Back behavior, source-line opening,
+  relative-path copy feedback, explicit renderer modes, and non-destructive file-change/deletion
+  notices driven by a new replayable `files` SSE event.
+- Added a lazy renderer registry for sanitized GFM/MDX, isolated HTML preview/source, locally
+  highlighted code, and virtualized plain/source text. Preview parsing is bounded at 1,000,000
+  characters while the complete virtualized source remains accessible.
+- Added local fenced Mermaid rendering with strict Mermaid configuration plus independent SVG
+  sanitization. PlantUML/PUMl, Graphviz/DOT, D2, Vega, and Vega-Lite fences receive a clear,
+  copyable source fallback without any remote renderer or repository-content transmission.
+- Added layered content safety: Markdown raw HTML sanitization and blocked assets, an empty-sandbox
+  HTML iframe with a nested default-deny CSP, removal of active/resource content, a shared
+  fragment/HTTP(S)-only URL policy, and parent-controlled safe HTML external links. Chromium tests
+  assert scripts, forms, frames, handlers, parent access, unsafe schemes, and hostile loads fail.
+- Added exact-offset literal/regex grep with case control, Unicode, overlaps, zero-width handling,
+  invalid-regex errors, capped counts, wraparound, Enter/Shift+Enter, visible/active source marks,
+  rendered Markdown literal marks, source fallback, a large-file Worker, and stale cancellation.
+- Added focused unit/component/browser coverage for the viewer, renderer registry, sanitization,
+  grep, source offsets, modal keyboard/focus behavior, copy/failure states, watcher changes, diagram
+  behavior, and a 20,000-line bounded-DOM fixture. Plan 9 viewer modules report 93.33-100% function
+  coverage except the Markdown integration at 92.59% (with its Mermaid path verified in Chromium),
+  and 96.46-100% line coverage.
+- The complete default suite passes with 314 tests and one opt-in local-model smoke test skipped;
+  suite coverage remains above 98% for lines and 97% for functions. Strict typecheck, Biome lint,
+  the production Vite build, and the real Playwright browser test pass. Full contracts and Plan 10
+  handoff guidance are recorded in `docs/plan-09-file-viewer-renderers-and-grep.md`.

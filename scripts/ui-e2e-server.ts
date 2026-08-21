@@ -13,13 +13,49 @@ const fixtureDir = await realpath(await mkdtemp(join(tmpdir(), "kbiss-ui-e2e-"))
 const root = join(fixtureDir, "card-gateway-artifacts");
 const stateDir = join(fixtureDir, "state");
 const cacheDir = join(fixtureDir, "cache");
-await Promise.all([mkdir(root), mkdir(stateDir), mkdir(cacheDir)]);
-
-const gatewayPath = join(root, "gateway.md");
-const clientPath = join(root, "client.ts");
 await Promise.all([
-  writeFile(gatewayPath, "# Gateway\nSet timeout_ms before retrying.\n"),
+  mkdir(join(root, "docs"), { recursive: true }),
+  mkdir(join(root, "packages"), { recursive: true }),
+  mkdir(join(root, "fixtures"), { recursive: true }),
+  mkdir(stateDir),
+  mkdir(cacheDir),
+]);
+
+const gatewayPath = join(root, "docs/gateway.md");
+const clientPath = join(root, "packages/client.ts");
+const unsafeHtmlPath = join(root, "fixtures/unsafe.html");
+await Promise.all([
+  writeFile(
+    gatewayPath,
+    `# Gateway
+Set timeout_ms before retrying.
+
+| Setting | Value |
+| --- | --- |
+| Timeout | 5000 |
+
+[Safe external](https://example.com/docs) [Unsafe](javascript:alert(1)) [Local](file:///tmp/secret) [Data](data:text/html,bad)
+
+<script>window.markdownPwned = true</script>
+<img src="https://bad.invalid/pixel" onerror="window.markdownPwned=true">
+<form action="https://bad.invalid"><input autofocus></form>
+<iframe srcdoc="<script>parent.markdownPwned=true</script>"></iframe>
+
+\`\`\`mermaid
+flowchart LR
+  Search --> Viewer
+\`\`\`
+
+\`\`\`plantuml
+Alice -> Bob: Safe source fallback
+\`\`\`
+`,
+  ),
   writeFile(clientPath, "export const timeout_ms = 5000;\n"),
+  writeFile(
+    unsafeHtmlPath,
+    `<h1>HTML fixture</h1><p onclick="parent.htmlPwned=true">Visible text</p><script>parent.htmlPwned=true</script><form action="https://bad.invalid"><input></form><iframe src="https://bad.invalid"></iframe><img src="https://bad.invalid/pixel"><a href="javascript:alert(1)">Unsafe HTML link</a><a href="https://example.com/docs">Safe HTML link</a>`,
+  ),
 ]);
 
 const config = {
@@ -39,7 +75,15 @@ const client = indexableFile("packages/client.ts", "client-content", {
   format: "typescript",
   mimeFamily: "text/typescript",
 });
-const services = fixtureServices(config, [gateway, client]);
+const unsafeHtml = indexableFile("fixtures/unsafe.html", "html-content", {
+  canonicalPath: unsafeHtmlPath,
+  rootIdentity: config.sourceRoots[0].identity,
+  filename: "unsafe.html",
+  extension: ".html",
+  format: "html",
+  mimeFamily: "text/html",
+});
+const services = fixtureServices(config, [gateway, client, unsafeHtml]);
 services.search.responseFactory = (request): SearchResponse => ({
   query: request.query.trim(),
   requestedFileCount: request.fileCount ?? 10,
@@ -111,6 +155,29 @@ services.search.responseFactory = (request): SearchResponse => ({
           score: 0.1,
           matchSources: ["metadata"],
           highlightTerms: ["timeout_ms"],
+        },
+      ],
+    },
+    {
+      fileId: unsafeHtml.fileId,
+      relativePath: unsafeHtml.relativePath,
+      filename: unsafeHtml.filename,
+      format: unsafeHtml.format,
+      score: 0.05,
+      matchSources: ["metadata"],
+      excerpts: [
+        {
+          chunkId: "html-primary",
+          text: "HTML fixture with visible content.",
+          startLine: 1,
+          endLine: 1,
+          startOffset: 0,
+          endOffset: 30,
+          headingTrail: ["HTML fixture"],
+          symbols: [],
+          score: 0.05,
+          matchSources: ["metadata"],
+          highlightTerms: [],
         },
       ],
     },

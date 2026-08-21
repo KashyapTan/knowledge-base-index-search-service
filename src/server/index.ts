@@ -31,6 +31,7 @@ export type {
   ApplicationServicesFactory,
   ApplicationStatus,
   FileMetadataResponse,
+  OpenFileChange,
   SequencedApplicationEvent,
 } from "./contracts.ts";
 export { API_PREFIX, MAX_FILE_BYTES, MAX_REQUEST_BYTES } from "./contracts.ts";
