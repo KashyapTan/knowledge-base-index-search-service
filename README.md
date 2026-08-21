@@ -3,8 +3,8 @@
 KBISS is a local-only search application for the `card-gateway-artifacts` repository. The current
 implementation includes the Bun/React foundation, validated runtime configuration, external
 per-user state layout, index compatibility checks, and a resumable file-discovery manifest with
-safe recursive watching. Semantic extraction, indexing, and search intentionally begin in later
-plans.
+safe recursive watching. It also includes local-only, structure-aware text extraction and
+tokenizer-bounded chunking. Embedding persistence and search intentionally begin in later plans.
 
 ## Requirements
 
@@ -59,7 +59,7 @@ src/
   server/       Bun HTTP lifecycle and API (foundation route only in Plan 1)
   config/       validated runtime configuration and local-state contracts
   discovery/    deterministic scanning, manifest persistence, and reconciled watching
-  extraction/   text extraction and chunking (Plan 4)
+  extraction/   safe format-aware extraction, source mapping, and tokenizer-bounded chunking
   indexing/     embedding worker boundary and later persistence pipeline
   search/       hybrid retrieval and aggregation (Plan 6)
   shared/       environment-independent contracts and result/error conventions
@@ -75,3 +75,5 @@ worker boundary, and [Plan 2 runtime configuration](docs/plan-02-runtime-configu
 configuration and persisted-state contracts. See
 [Plan 3 file discovery](docs/plan-03-file-discovery.md) for inventory, change, manifest, ignore, and
 watcher contracts consumed by extraction and indexing.
+See [Plan 4 text extraction](docs/plan-04-text-extraction.md) for extractor selection, normalized
+source mapping, chunk identity, token-limit, and Plan 5 persistence contracts.

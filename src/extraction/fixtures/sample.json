@@ -1,0 +1,7 @@
+{
+  "gateway": {
+    "retries": 3,
+    "enabled": true,
+    "regions": ["us-east", "eu-west"]
+  }
+}
