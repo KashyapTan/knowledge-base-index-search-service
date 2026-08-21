@@ -1,0 +1,3 @@
+[gateway.retry]
+attempts = 3
+enabled = true

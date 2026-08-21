@@ -1,0 +1,9 @@
+.gateway-button {
+  color: green;
+}
+
+@media (prefers-reduced-motion) {
+  .gateway-button {
+    transition: none;
+  }
+}

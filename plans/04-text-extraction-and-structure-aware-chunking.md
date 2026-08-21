@@ -87,3 +87,27 @@ Target approximately 93% line and function coverage for non-trivial extractor, n
 ## Handoff
 
 Plan 05 consumes the chunk contracts, produces local embeddings, and persists file/chunk state in LanceDB.
+
+## Completion notes (2026-08-20)
+
+- Added the exported Plan 4 contracts and composed extraction pipeline. It consumes only ready
+  `DiscoveredFile` records, revalidates root identity, relative paths, canonical containment, and
+  path stability immediately around each read, and isolates every expected failure by file ID.
+- Added deterministic CRLF/CR and invalid-Unicode normalization with one-based line data and
+  normalized-to-original UTF-16 offset mapping. Invalid UTF-8 changes after discovery are decoded
+  predictably with an actionable warning rather than terminating extraction.
+- Added a format-keyed extractor registry for Markdown/MDX, visible HTML, Python,
+  JavaScript/TypeScript/JSX/TSX, JSON/JSONC/YAML/TOML/XML, shell/SQL/stylesheets, CSV, and ordinary
+  text. Malformed syntax and unexpected parser failures use safe bounded fallbacks.
+- Added structure-aware chunking with the configured 400-token target and 50-token overlap,
+  injected selected-model token counting, a hard 512-token recount, path/format/heading/symbol
+  enrichment kept separate from display text, SHA-256 content hashes, and stable semantic chunk
+  IDs.
+- Added reviewed fixtures and focused/property-style assertions for all extractor families,
+  nested headings, frontmatter, fenced code, hidden HTML content, malformed and unclosed syntax,
+  large declarations, extreme lines, invalid Unicode/UTF-8, empty files, deterministic IDs,
+  overlap, hard limits, and exact source ranges. The full suite passes with 181 tests and reports
+  98.84% line and 99.56% function coverage overall; Plan 4 application modules exceed the 93%
+  target.
+- The complete public API, tokenizer expectation, safety boundary, field semantics, and Plan 5
+  handoff are recorded in `docs/plan-04-text-extraction.md`.

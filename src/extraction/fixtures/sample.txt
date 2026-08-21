@@ -1,0 +1,6 @@
+Gateway deployment checklist
+
+Verify the local configuration.
+Confirm that no repository content leaves the machine.
+
+2026-08-20 INFO indexing complete

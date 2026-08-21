@@ -1,0 +1,4 @@
+<gateway>
+  <attempts>3</attempts>
+  <mode>safe</mode>
+</gateway>
