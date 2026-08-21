@@ -1,0 +1,39 @@
+{
+  "name": "knowledge-base-index-search-service",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "packageManager": "bun@1.4.0",
+  "engines": {
+    "bun": "1.4.0"
+  },
+  "scripts": {
+    "dev": "\"$npm_execpath\" run build:ui && \"$npm_execpath\" --hot src/server/index.ts",
+    "build": "\"$npm_execpath\" run build:ui && \"$npm_execpath\" run typecheck",
+    "build:ui": "vite build",
+    "serve": "\"$npm_execpath\" run build:ui && \"$npm_execpath\" run src/server/index.ts",
+    "typecheck": "tsc --noEmit",
+    "lint": "biome check .",
+    "format": "biome format --write .",
+    "test": "\"$npm_execpath\" test",
+    "compat": "\"$npm_execpath\" run build:ui && \"$npm_execpath\" run scripts/compatibility-check.ts"
+  },
+  "dependencies": {
+    "@huggingface/transformers": "4.2.0",
+    "@lancedb/lancedb": "0.37.1",
+    "react": "19.2.8",
+    "react-dom": "19.2.8"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "2.5.9",
+    "@types/bun": "1.4.0",
+    "@types/react": "19.2.18",
+    "@types/react-dom": "19.2.4",
+    "@vitejs/plugin-react": "6.1.0",
+    "typescript": "7.0.2",
+    "vite": "8.2.2"
+  },
+  "trustedDependencies": [
+    "onnxruntime-node"
+  ]
+}
