@@ -6,7 +6,7 @@ import type {
 } from "../server/index.ts";
 
 const API_PREFIX = "/api/v1";
-const EVENT_TYPES = ["snapshot", "startup", "discovery", "indexing", "issue"] as const;
+const EVENT_TYPES = ["snapshot", "startup", "discovery", "indexing", "files", "issue"] as const;
 
 interface ErrorEnvelope {
   readonly error?: {
@@ -35,6 +35,7 @@ export interface KbissApi {
   getStatus(signal: AbortSignal): Promise<ApplicationStatus>;
   search(request: SearchRequest, signal: AbortSignal): Promise<SearchResponse>;
   getFileMetadata(fileId: string, signal: AbortSignal): Promise<FileMetadataResponse>;
+  getFileContent(fileId: string, signal: AbortSignal): Promise<string>;
   subscribe(
     onEvent: (event: ApplicationEventData) => void,
     onConnectionError: (message: string) => void,
@@ -82,6 +83,15 @@ export class BrowserKbissApi implements KbissApi {
         headers: { Accept: "application/json" },
       }),
     );
+  }
+
+  async getFileContent(fileId: string, signal: AbortSignal): Promise<string> {
+    const response = await fetch(`${API_PREFIX}/files/${encodeURIComponent(fileId)}/content`, {
+      signal,
+      headers: { Accept: "text/plain" },
+    });
+    if (response.ok) return response.text();
+    return readResponse<never>(response);
   }
 
   subscribe(

@@ -6,6 +6,7 @@ import { initialStartupState, StartupStateStore } from "../config/index.ts";
 import { FakeEmbeddingProvider } from "../indexing/index.ts";
 import { indexableFile, indexingConfig } from "../indexing/test-helpers.ts";
 import { err, ok } from "../shared/result.ts";
+import { ApplicationEventHub } from "./progress.ts";
 import {
   ApplicationRuntime,
   createProductionServices,
@@ -162,7 +163,11 @@ describe("application lifecycle", () => {
   test("reports unavailable operations until initialized and is idempotent", async () => {
     const { config, state } = setup();
     const services = fixtureServices(config);
-    const runtime = new ApplicationRuntime(config, state, { factory: async () => ok(services) });
+    const events = new ApplicationEventHub({ heartbeatMs: 60_000 });
+    const runtime = new ApplicationRuntime(config, state, {
+      factory: async () => ok(services),
+      events,
+    });
     runtimes.push(runtime);
     expect(await runtime.search({ query: "x" }, new AbortController().signal)).toMatchObject({
       ok: false,
@@ -175,19 +180,26 @@ describe("application lifecycle", () => {
     await Promise.all([runtime.initialize(), runtime.initialize()]);
     expect(runtime.status()).toMatchObject({ startup: { phase: "ready" }, searchAvailable: true });
     expect(services.discovery.watcher.starts).toBe(1);
+    const marker = events.publish({ type: "issue", issue: { code: "MARKER", message: "marker" } });
     const changed = indexableFile("changed.md", "hash");
     await services.discovery.manifest.replace(
       [changed],
       [
         {
-          kind: "added",
+          kind: "content-changed",
           fileId: changed.fileId,
           relativePath: changed.relativePath,
           source: "watch",
           current: changed,
+          previous: changed,
         },
       ],
     );
+    const eventReader = events.stream(marker.id, () => runtime.status()).getReader();
+    const fileEvent = new TextDecoder().decode((await eventReader.read()).value);
+    expect(fileEvent).toContain('"type":"files"');
+    expect(fileEvent).toContain(`"fileId":"${changed.fileId}"`);
+    await eventReader.cancel();
     await Bun.sleep(1);
     expect(services.indexing.changeCalls).toBe(1);
   });

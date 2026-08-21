@@ -12,14 +12,8 @@ import {
 } from "./url-state.ts";
 import { useApplicationStatus } from "./use-application-status.ts";
 import { useSearch } from "./use-search.ts";
-
-interface ViewerSelection {
-  readonly fileId: string;
-  readonly filename: string;
-  readonly relativePath: string;
-  readonly format: string;
-  readonly line?: number;
-}
+import type { ViewerSelection } from "./viewer/contracts.ts";
+import { FileViewer } from "./viewer/file-viewer.tsx";
 
 function selectionFromUrl(results: readonly SearchFileResult[]): ViewerSelection | undefined {
   const url = readUrlState(new URL(window.location.href));
@@ -89,33 +83,6 @@ function StatusPanel({
   );
 }
 
-function ViewerHost({
-  selection,
-  onClose,
-}: {
-  readonly selection: ViewerSelection;
-  onClose(): void;
-}) {
-  return (
-    <aside className="viewer-host" aria-label="Selected file" aria-live="polite">
-      <div>
-        <p className="viewer-kicker">Full-file viewer</p>
-        <h2>{selection.filename}</h2>
-        <p className="viewer-path" title={selection.relativePath}>
-          {selection.relativePath}
-        </p>
-        <p>
-          {selection.format}
-          {selection.line ? ` · opening near line ${selection.line}` : ""}
-        </p>
-      </div>
-      <button type="button" className="quiet-button" onClick={onClose}>
-        Close selection
-      </button>
-    </aside>
-  );
-}
-
 const RESULT_COUNTS = [5, DEFAULT_FILE_COUNT, 20, 30, 50] as const;
 
 export function App({
@@ -145,6 +112,7 @@ export function App({
   useEffect(() => searchInput.current?.focus({ preventScroll: true }), []);
   useEffect(() => {
     const onShortcut = (event: KeyboardEvent): void => {
+      if (selection) return;
       const target = event.target;
       const isEditing =
         target instanceof HTMLInputElement ||
@@ -160,7 +128,7 @@ export function App({
     };
     window.addEventListener("keydown", onShortcut);
     return () => window.removeEventListener("keydown", onShortcut);
-  }, []);
+  }, [selection]);
   useEffect(() => {
     const onPopState = (): void => setSelection(selectionFromUrl(results));
     window.addEventListener("popstate", onPopState);
@@ -400,7 +368,15 @@ export function App({
         </section>
       </main>
 
-      {selection ? <ViewerHost selection={selection} onClose={closeFile} /> : null}
+      {selection ? (
+        <FileViewer
+          key={selection.fileId}
+          selection={selection}
+          api={api}
+          fileChanges={statusState.fileChanges}
+          onClose={closeFile}
+        />
+      ) : null}
       <footer className="privacy-footer">
         Searches stay on this machine. Submitted query and result-count state are reflected in the
         localhost URL for sharing and refresh.

@@ -5,7 +5,7 @@ const LOCAL_NAMES = new Set(["127.0.0.1", "localhost", "[::1]"]);
 
 export const SECURITY_HEADERS = Object.freeze({
   "Content-Security-Policy":
-    "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; font-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'; object-src 'none'",
+    "default-src 'none'; script-src 'self'; worker-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; font-src 'self'; frame-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'; object-src 'none'",
   "Cross-Origin-Opener-Policy": "same-origin",
   "Referrer-Policy": "no-referrer",
   "X-Content-Type-Options": "nosniff",

@@ -65,6 +65,11 @@ describe("browser API adapter", () => {
       const request = new Request(new URL(String(input), "http://localhost"), init);
       requests.push(request);
       if (request.url.endsWith("/status")) return Response.json(status());
+      if (request.url.endsWith("/content")) {
+        return new Response("# Guide\nComplete content.\n", {
+          headers: { "Content-Type": "text/plain" },
+        });
+      }
       if (request.url.includes("/files/")) {
         return Response.json({
           fileId: "a".repeat(64),
@@ -101,10 +106,12 @@ describe("browser API adapter", () => {
       "timeout_ms",
     );
     expect((await api.getFileMetadata("a".repeat(64), signal)).filename).toBe("guide.md");
+    expect(await api.getFileContent("a".repeat(64), signal)).toContain("Complete content");
     expect(requests.map((request) => new URL(request.url).pathname)).toEqual([
       "/api/v1/status",
       "/api/v1/search",
       `/api/v1/files/${"a".repeat(64)}`,
+      `/api/v1/files/${"a".repeat(64)}/content`,
     ]);
     expect(requests[1]?.method).toBe("POST");
     expect(await requests[1]?.json()).toEqual({ query: "timeout_ms", fileCount: 5 });
@@ -158,10 +165,19 @@ describe("browser API adapter", () => {
         data: JSON.stringify({ type: "snapshot", status: status() }),
       }),
     );
+    source.emit(
+      "files",
+      new MessageEvent("files", {
+        data: JSON.stringify({
+          type: "files",
+          changes: [{ fileId: "a".repeat(64), kind: "changed" }],
+        }),
+      }),
+    );
     source.emit("issue", new MessageEvent("issue", { data: "{" }));
     source.emit("startup", new Event("startup"));
     source.onerror?.(new Event("error"));
-    expect(events).toEqual(["snapshot"]);
+    expect(events).toEqual(["snapshot", "files"]);
     expect(errors).toEqual([
       "A progress update could not be read.",
       "Reconnecting to local progress updates…",

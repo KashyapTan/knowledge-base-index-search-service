@@ -13,6 +13,10 @@ function luminance([red = 0, green = 0, blue = 0]: readonly number[]): number {
 }
 
 test("keyboard search flow uses the real local API contract", async ({ page }) => {
+  const hostileRequests: string[] = [];
+  page.on("request", (request) => {
+    if (request.url().includes("bad.invalid")) hostileRequests.push(request.url());
+  });
   await page.emulateMedia({ reducedMotion: "reduce" });
   await page.goto("/");
   await page.bringToFront();
@@ -34,8 +38,8 @@ test("keyboard search flow uses the real local API contract", async ({ page }) =
   );
   await page.keyboard.press("Enter");
   expect((await searchResponse).status()).toBe(200);
-  await expect(page.getByRole("heading", { name: "2 results" })).toBeVisible();
-  await expect(page.getByRole("article")).toHaveCount(2);
+  await expect(page.getByRole("heading", { name: "3 results" })).toBeVisible();
+  await expect(page.getByRole("article")).toHaveCount(3);
   await expect(page.locator("mark")).toHaveCount(3);
 
   await search.press("ArrowDown");
@@ -56,10 +60,56 @@ test("keyboard search flow uses the real local API contract", async ({ page }) =
 
   await openActions.nth(0).focus();
   await page.keyboard.press("Enter");
-  const viewerHost = page.getByRole("complementary", { name: "Selected file" });
+  const viewerHost = page.getByRole("dialog", { name: "gateway.md" });
   await expect(viewerHost).toBeVisible();
   await expect(viewerHost.getByRole("heading", { name: "gateway.md" })).toBeVisible();
   await expect(page).toHaveURL(/file=[a-f0-9]{64}/u);
+  await expect(viewerHost.getByRole("heading", { name: "Gateway" })).toBeVisible();
+  await expect(viewerHost.locator("table")).toBeVisible();
+  await expect(viewerHost.locator("script, form, iframe, img")).toHaveCount(0);
+  expect(await page.evaluate(() => Reflect.get(window, "markdownPwned"))).toBeUndefined();
+  const safeLink = viewerHost.getByRole("link", { name: "Safe external" });
+  await expect(safeLink).toHaveAttribute("href", "https://example.com/docs");
+  await expect(safeLink).toHaveAttribute("target", "_blank");
+  await expect(safeLink).toHaveAttribute("rel", "noopener noreferrer");
+  await expect(viewerHost.getByText("Unsafe", { exact: true })).not.toHaveAttribute("href");
+  await expect(viewerHost.getByText("Local", { exact: true })).not.toHaveAttribute("href");
+  await expect(viewerHost.getByText("Data", { exact: true })).not.toHaveAttribute("href");
+  await expect(viewerHost.getByRole("figure", { name: "Mermaid diagram" })).toBeVisible({
+    timeout: 15_000,
+  });
+  await expect(viewerHost.locator(".mermaid-diagram svg")).toBeVisible();
+  await expect(viewerHost.getByText(/plantuml diagram source/)).toBeVisible();
+
+  const grep = viewerHost.getByRole("searchbox", { name: "Find in file" });
+  await grep.fill("timeout_ms");
+  await expect(viewerHost.getByText("1 of 1")).toBeVisible();
+  await grep.press("Enter");
+  await expect(viewerHost.getByRole("button", { name: "Source" })).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  );
+  await expect(viewerHost.locator("mark.active-match")).toHaveCount(1);
+
+  await viewerHost.getByRole("button", { name: "Close viewer" }).click();
+  await openActions.nth(2).click();
+  const htmlViewer = page.getByRole("dialog", { name: "unsafe.html" });
+  await expect(htmlViewer).toBeVisible();
+  const frame = htmlViewer.getByTitle("Sandboxed HTML preview");
+  await expect(frame).toHaveAttribute("sandbox", "");
+  const htmlBody = frame.contentFrame();
+  await expect(htmlBody.getByRole("heading", { name: "HTML fixture" })).toBeVisible();
+  await expect(htmlBody.locator("script, form, iframe, img")).toHaveCount(0);
+  await expect(htmlBody.getByText("Unsafe HTML link")).not.toHaveAttribute("href");
+  const htmlSafeLink = htmlBody.getByRole("link", { name: "Safe HTML link" });
+  await expect(htmlSafeLink).toHaveAttribute("rel", "noopener noreferrer");
+  const parentHtmlLink = htmlViewer.getByRole("link", { name: "Safe HTML link" });
+  await expect(parentHtmlLink).toHaveAttribute("target", "_blank");
+  await expect(parentHtmlLink).toHaveAttribute("rel", "noopener noreferrer");
+  expect(await page.evaluate(() => Reflect.get(window, "htmlPwned"))).toBeUndefined();
+  expect(hostileRequests).toEqual([]);
+  await page.goBack();
+  await expect(htmlViewer).toBeHidden();
 
   const motionDuration = await page
     .locator(".status-dot")

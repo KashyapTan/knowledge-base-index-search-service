@@ -11,6 +11,7 @@ export function applyApplicationEvent(
   if (event.type === "startup") return { ...current, startup: event.startup };
   if (event.type === "discovery") return { ...current, discovery: event.progress };
   if (event.type === "indexing") return { ...current, indexing: event.progress };
+  if (event.type === "files") return current;
   const exists = current.startup.issues.some(
     (issue) => issue.code === event.issue.code && issue.fileId === event.issue.fileId,
   );
