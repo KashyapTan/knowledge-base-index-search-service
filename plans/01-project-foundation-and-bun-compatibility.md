@@ -77,3 +77,26 @@ Do not use `bun build --compile`; normal source execution is the supported deliv
 
 Plan 02 uses the proven imports and runtime boundaries to implement durable configuration, startup state, and local storage resolution.
 
+## Completion notes (2026-08-20)
+
+- Created one strict Bun/TypeScript package with the planned `src/` module boundaries, a minimal
+  React/Vite asset, Biome formatting/linting, Bun tests, and an exact Bun 1.4.0 pin. The foundation
+  was initially proven on 1.3.12, then revalidated and upgraded when stable 1.4.0 was released.
+- Pinned the proven native path to `@lancedb/lancedb` 0.37.1 and
+  `@huggingface/transformers` 4.2.0. `onnxruntime-node` is explicitly trusted so Bun runs the native
+  package's required install script.
+- Selected a Bun Worker as the inference boundary. The typed protocol currently supports
+  `initialize`, `embed`, and `shutdown`, returns structured success/error variants, and keeps model
+  loading plus inference off the HTTP thread. Bun 1.4's Worker termination fixes materially reduce
+  lifecycle risk, though Web Workers remain experimental and the child-process fallback remains.
+- Confirmed q8 `Xenova/bge-small-en-v1.5` loading with mean pooling and L2 normalization. The
+  observed embedding dimension is 384.
+- Confirmed local LanceDB connection/table creation/reopening/vector retrieval, loopback
+  `Bun.serve()` health handling, and same-origin serving of Vite's compiled entry asset.
+- The Bun 1.4 disposable compatibility run passed on macOS 26.6 arm64. HTTP health probes completed
+  in 0.3 ms while model loading and 0.2 ms while inference were in flight; these are compatibility
+  observations, not Plan 11 benchmarks.
+- Temporary LanceDB and model-cache data are created under the OS temporary directory and removed
+  in a `finally` block. No runtime data is stored in this repository.
+- Detailed imports, versions, platform status, Worker limitations, and the child-process fallback
+  are recorded in `docs/plan-01-compatibility.md`.
