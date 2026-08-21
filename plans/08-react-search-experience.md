@@ -81,3 +81,32 @@ Target approximately 93% line and function coverage for non-trivial UI state, ho
 ## Handoff
 
 Plan 09 implements the full-file modal/viewer and its renderer-specific grep behavior.
+
+## Completion notes (2026-08-21)
+
+- Replaced the Plan 7 lifecycle placeholder with a responsive React search application using a
+  small local CSS system, system fonts, no remote assets, and no telemetry. The shell shows the
+  product privacy posture, a server-derived basename-only source label, live readiness/indexing
+  state, search controls, distinct-file results, diagnostics, and the Plan 9 viewer host.
+- Added a typed browser adapter over the shared Plan 6/7 contracts, one SSE subscription, display-safe
+  API failures, and deep-linked opaque-ID metadata lookup. `ApplicationStatus.sourceRootLabel` is
+  derived without exposing an absolute source path.
+- Added 250 ms debounced search plus immediate Enter/button submission, exact query preservation,
+  configurable top-X, AbortController cancellation, generation-based stale-response rejection,
+  previous-result preservation during refresh, and distinct idle/loading/refresh/no-result/error/
+  partial-index states.
+- Added file-grouped cards with root-relative paths, formats, best excerpt context and source lines,
+  safe literal highlighting, collapsed supplemental excerpts, and no misleading score percentage.
+  Long paths and large excerpts are bounded without losing their underlying accessible text.
+- Added load focus, `/` and Command/Ctrl-K refocus, ArrowUp/ArrowDown/Home/End result movement,
+  semantic controls/live regions, visible focus, responsive layouts, contrast-aware colors, and
+  reduced-motion behavior. The full search flow is usable without a mouse.
+- Added URL-backed `q`/`n` state with replace semantics and pushed opaque file/line selection state
+  for predictable refresh and Back behavior. The UI and detailed Plan 8 contract explicitly disclose
+  that shareable localhost URLs can retain submitted queries in browser history.
+- Added 19 deterministic UI tests and one Playwright browser smoke path through the real production
+  asset and Plan 7 API/SSE router. Plan 8 UI modules report 99.29% line and 97.90% function coverage;
+  the complete suite passes 294 tests with one opt-in model smoke test skipped and reports 99.47%
+  line and 98.80% function coverage. Playwright, strict typecheck, lint, and production build pass.
+- Full browser contracts, URL privacy behavior, request coordination, accessibility decisions, and
+  the Plan 9 viewer handoff are recorded in `docs/plan-08-react-search-experience.md`.

@@ -19,5 +19,5 @@
     "target": "ESNext",
     "types": ["bun"]
   },
-  "include": ["scripts", "src", "vite.config.ts"]
+  "include": ["e2e", "scripts", "src", "playwright.config.ts", "vite.config.ts"]
 }

@@ -3,6 +3,7 @@ import type { ApplicationStatus } from "./contracts.ts";
 import { ApplicationEventHub, parseLastEventId } from "./progress.ts";
 
 const status: ApplicationStatus = {
+  sourceRootLabel: "fixture-root",
   startup: { phase: "ready", changedAt: 1, issues: [] },
   searchAvailable: true,
   actionInProgress: false,

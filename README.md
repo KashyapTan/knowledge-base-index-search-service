@@ -5,13 +5,15 @@ implementation includes the Bun/React foundation, validated runtime configuratio
 per-user state layout, index compatibility checks, and a resumable file-discovery manifest with
 safe recursive watching. It also includes local-only, structure-aware text extraction and
 tokenizer-bounded chunking, local Worker-based BGE embeddings, and resumable LanceDB file/chunk
-indexing, hybrid BM25/vector/path retrieval, and a secure loopback-only API with streamed startup
-and indexing progress. The primary React search UI and full-file renderers remain in Plans 08-09.
+indexing, hybrid BM25/vector/path retrieval, a secure loopback-only API with streamed startup and
+indexing progress, and an accessible React search interface for distinct-file results. The secure
+full-file renderers and in-viewer grep remain in Plan 09.
 
 ## Requirements
 
 - Bun 1.4.0 (pinned in `.bun-version` and `package.json`)
 - A platform supported by the pinned native packages; Plan 1 is verified on macOS arm64
+- A local Playwright Chromium install for browser tests (`bunx playwright install chromium`)
 - Internet access for the first compatibility run, which downloads the public BGE model into a
   temporary directory and removes it when the check ends
 - Internet access for the explicit first `model:setup`; indexing after setup remains offline
@@ -61,6 +63,8 @@ writes indexes or model assets into either repository.
 | `bun run model:setup` | Explicitly download/verify the configured model in the external local cache. |
 | `bun run format` | Apply the repository formatter. |
 | `bun test` | Run focused Bun tests. |
+| `bun run test:ui` | Run deterministic React component, hook, URL, and browser-adapter tests. |
+| `bun run test:e2e` | Build the UI and run the Playwright keyboard/API smoke path. |
 | `bun run test:coverage` | Run Bun tests with line and function coverage. |
 | `bun run compat` | Exercise LanceDB, BGE inference, Bun Workers, HTTP, and Vite together. |
 
@@ -95,3 +99,5 @@ LanceDB schemas, commit/recovery semantics, progress events, and Plan 6 retrieva
 See [Plan 6 hybrid search](docs/plan-06-hybrid-search.md) for ranking and response contracts, and
 [Plan 7 local API](docs/plan-07-local-api-lifecycle-security.md) for routes, SSE, lifecycle, file
 containment, and browser security contracts consumed by Plans 08-09.
+See [Plan 8 React search](docs/plan-08-react-search-experience.md) for browser request coordination,
+URL privacy behavior, result presentation, keyboard interaction, and the Plan 9 viewer-host handoff.
