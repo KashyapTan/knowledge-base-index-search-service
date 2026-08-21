@@ -282,7 +282,7 @@ export class LanceIndexStore implements IndexStore {
             incompleteCompatibleIndex
               ? "one or more required LanceDB tables are missing"
               : assessment.value.reasons.join(", ")
-          }.`,
+          }. Run bun run rebuild with the same root/configuration options; KBISS will preserve the previous index before replacing it.`,
         );
       }
       if (needsRebuild) {
@@ -323,7 +323,7 @@ export class LanceIndexStore implements IndexStore {
         connection.close();
         return storeFailure(
           "INDEX_SCHEMA_INVALID",
-          "The LanceDB tables do not match the configured schema and vector dimension; reopen with controlled rebuild enabled.",
+          "The LanceDB tables do not match the configured schema and vector dimension. Run bun run rebuild with the same root/configuration options; KBISS will preserve the previous index.",
         );
       }
 

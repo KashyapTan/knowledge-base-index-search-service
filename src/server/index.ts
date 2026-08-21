@@ -104,11 +104,27 @@ async function serveUi(pathname: string, uiDistDir: string): Promise<Response> {
     });
   }
   const asset = Bun.file(assetPath);
-  if (await asset.exists()) return new Response(asset, { headers: withSecurityHeaders() });
+  if (await asset.exists()) {
+    const immutable = /^\/assets\/[^/]+-[A-Za-z0-9_-]{8,}\.[^/]+$/u.test(requestedPath);
+    const html = requestedPath.endsWith(".html");
+    return new Response(asset, {
+      headers: withSecurityHeaders({
+        "Cache-Control": html
+          ? "no-cache"
+          : immutable
+            ? "public, max-age=31536000, immutable"
+            : "public, max-age=0, must-revalidate",
+        "Content-Type": asset.type || "application/octet-stream",
+      }),
+    });
+  }
   const index = Bun.file(resolve(uiDistDir, "index.html"));
   if ((await index.exists()) && !requestedPath.includes(".")) {
     return new Response(index, {
-      headers: withSecurityHeaders({ "Content-Type": "text/html; charset=utf-8" }),
+      headers: withSecurityHeaders({
+        "Cache-Control": "no-cache",
+        "Content-Type": "text/html; charset=utf-8",
+      }),
     });
   }
   return new Response("UI assets are not built.", {
@@ -302,7 +318,9 @@ export interface ExistingApplication {
 
 export type ApplicationLaunch = StartedApplication | ExistingApplication;
 
-async function findCompatibleInstance(config: AppConfig): Promise<ExistingApplication | undefined> {
+export async function findCompatibleInstance(
+  config: AppConfig,
+): Promise<ExistingApplication | undefined> {
   const lastPort = Math.min(65_535, config.server.port + 19);
   const probes = Array.from({ length: lastPort - config.server.port + 1 }, async (_, offset) => {
     const url = new URL(`http://${LOOPBACK_HOST}:${config.server.port + offset}`);

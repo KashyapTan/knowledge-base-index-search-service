@@ -27,6 +27,7 @@ describe("discovery service composition", () => {
     const config: AppConfig = {
       embedding: DEFAULT_EMBEDDING_CONFIG,
       index: DEFAULT_INDEX_CONFIG,
+      offline: false,
       sourceRoots: [{ identity: "root-id", path: root }],
       server: { hostname: "127.0.0.1", port: 3210 },
       paths: {

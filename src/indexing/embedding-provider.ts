@@ -5,9 +5,14 @@ import type {
   EmbeddingIdentity,
   EmbeddingProvider,
   EmbedOptions,
+  ModelWarmUpOptions,
 } from "./contracts.ts";
 import { EmbeddingWorkerClient, EmbeddingWorkerError } from "./embedding-worker-client.ts";
-import { verifyOrWriteModelAssetManifest } from "./model-assets.ts";
+import {
+  inspectModelAssets,
+  quarantineModelCache,
+  verifyOrWriteModelAssetManifest,
+} from "./model-assets.ts";
 
 export const BGE_MODEL_PROFILES = Object.freeze({
   "Xenova/bge-small-en-v1.5": { maximumTokens: 512, vectorDimension: 384 },
@@ -97,16 +102,24 @@ export class TransformersEmbeddingProvider implements EmbeddingProvider {
     return text;
   }
 
-  async warmUp(
-    options: { readonly allowDownload?: boolean } = {},
-  ): Promise<Result<void, EmbeddingError>> {
+  async warmUp(options: ModelWarmUpOptions = {}): Promise<Result<void, EmbeddingError>> {
     if (this.#closed)
       return err(
         embeddingFailure("EMBEDDING_PROVIDER_CLOSED", "The embedding provider is closed."),
       );
-    const assets = await verifyOrWriteModelAssetManifest(this.#cacheDir, this.identity, "verify");
-    if (!assets.ok) return assets;
+    const progress = options.onProgress ?? (() => undefined);
+    progress("verifying", "Verifying local model assets.");
+    const inspection = await inspectModelAssets(this.#cacheDir, this.identity);
+    if (inspection.state === "corrupt") {
+      if (!options.allowDownload || !options.recoverCorruptAssets) {
+        return err(embeddingFailure("MODEL_ASSETS_INVALID", inspection.message));
+      }
+      progress("recovering", "Preserving the corrupt cache before reacquiring model assets.");
+      const quarantined = await quarantineModelCache(this.#cacheDir);
+      if (!quarantined.ok) return quarantined;
+    }
     try {
+      progress("loading-local", "Loading the model from the local cache.");
       await this.#worker.initialize({
         modelId: this.identity.modelId,
         dtype: this.identity.quantization,
@@ -118,18 +131,36 @@ export class TransformersEmbeddingProvider implements EmbeddingProvider {
       if (!(error instanceof EmbeddingWorkerError) || error.code !== "MODEL_ASSETS_MISSING") {
         return err(mapWorkerError(error));
       }
-      if (!options.allowDownload) return err(mapWorkerError(error));
-      try {
-        await this.#worker.initialize({
-          modelId: this.identity.modelId,
-          dtype: this.identity.quantization,
-          expectedDimension: this.identity.vectorDimension,
-          cacheDir: this.#cacheDir,
-          localFilesOnly: false,
-        });
-      } catch (downloadError) {
-        return err(mapWorkerError(downloadError));
+      if (!options.allowDownload) {
+        return err(
+          embeddingFailure(
+            "MODEL_ASSETS_MISSING",
+            "Local model assets are unavailable in offline mode. Run bun run model:setup while online or import a controlled local asset source.",
+          ),
+        );
       }
+      const attempts = Math.max(1, Math.min(5, options.downloadRetries ?? 2));
+      let downloadError: unknown;
+      for (let attempt = 1; attempt <= attempts; attempt += 1) {
+        progress(
+          "downloading",
+          `Downloading the pinned model (${attempt}/${attempts}); existing verified assets remain local.`,
+        );
+        try {
+          await this.#worker.initialize({
+            modelId: this.identity.modelId,
+            dtype: this.identity.quantization,
+            expectedDimension: this.identity.vectorDimension,
+            cacheDir: this.#cacheDir,
+            localFilesOnly: false,
+          });
+          downloadError = undefined;
+          break;
+        } catch (error) {
+          downloadError = error;
+        }
+      }
+      if (downloadError) return err(mapWorkerError(downloadError));
     }
     const manifest = await verifyOrWriteModelAssetManifest(
       this.#cacheDir,
@@ -138,6 +169,7 @@ export class TransformersEmbeddingProvider implements EmbeddingProvider {
     );
     if (!manifest.ok) return manifest;
     this.#ready = true;
+    progress("ready", "Local model assets are verified and ready for offline use.");
     return ok(undefined);
   }
 

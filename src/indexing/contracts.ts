@@ -29,12 +29,26 @@ export type EmbeddingErrorCode =
 
 export interface EmbeddingError extends AppError<EmbeddingErrorCode> {}
 
+export type ModelSetupPhase =
+  | "verifying"
+  | "recovering"
+  | "loading-local"
+  | "downloading"
+  | "ready";
+
+export interface ModelWarmUpOptions {
+  readonly allowDownload?: boolean;
+  readonly downloadRetries?: number;
+  readonly recoverCorruptAssets?: boolean;
+  readonly onProgress?: (phase: ModelSetupPhase, message: string) => void;
+}
+
 export interface EmbeddingProvider {
   readonly identity: EmbeddingIdentity;
   readonly batchSize: number;
   encodeDocument(text: string): string;
   encodeQuery(text: string): string;
-  warmUp(options?: { readonly allowDownload?: boolean }): Promise<Result<void, EmbeddingError>>;
+  warmUp(options?: ModelWarmUpOptions): Promise<Result<void, EmbeddingError>>;
   embedDocuments(
     texts: readonly string[],
     options?: EmbedOptions,

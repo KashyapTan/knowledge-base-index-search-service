@@ -26,12 +26,13 @@ beforeEach(async () => {
     mkdir(join(fixtureDir, "root")),
     mkdir(join(fixtureDir, "state")),
     mkdir(join(fixtureDir, "cache")),
-    mkdir(join(fixtureDir, "ui")),
+    mkdir(join(fixtureDir, "ui", "assets"), { recursive: true }),
     mkdir(join(fixtureDir, "project")),
   ]);
   await Promise.all([
     writeFile(join(fixtureDir, "ui", "index.html"), "<main>KBISS</main>"),
     writeFile(join(fixtureDir, "ui", "app.js"), "export {};"),
+    writeFile(join(fixtureDir, "ui", "assets", "app-12345678.js"), "export const built = true;"),
   ]);
 });
 
@@ -102,7 +103,14 @@ describe("Plan 7 Bun API", () => {
       searchAvailable: true,
     });
     expect(await (await fetch(server.url)).text()).toBe("<main>KBISS</main>");
-    expect(await (await fetch(new URL("/app.js", server.url))).text()).toBe("export {};");
+    const asset = await fetch(new URL("/app.js", server.url));
+    expect(await asset.text()).toBe("export {};");
+    expect(asset.headers.get("content-type")).toContain("javascript");
+    expect(asset.headers.get("cache-control")).toBe("public, max-age=0, must-revalidate");
+    expect(
+      (await fetch(new URL("/assets/app-12345678.js", server.url))).headers.get("cache-control"),
+    ).toBe("public, max-age=31536000, immutable");
+    expect((await fetch(server.url)).headers.get("cache-control")).toBe("no-cache");
     expect(await (await fetch(new URL("/search/results", server.url))).text()).toBe(
       "<main>KBISS</main>",
     );

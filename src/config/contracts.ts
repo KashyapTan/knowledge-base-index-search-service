@@ -56,6 +56,8 @@ export interface IndexCompatibility {
 export interface AppConfig {
   readonly embedding: EmbeddingConfig;
   readonly index: IndexConfig;
+  /** Prevent every model-loading path from using the network. */
+  readonly offline: boolean;
   readonly paths: ResolvedPaths;
   readonly server: {
     readonly hostname: typeof LOOPBACK_HOST;

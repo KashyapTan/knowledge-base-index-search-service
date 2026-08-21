@@ -3,7 +3,7 @@ import { mkdir, mkdtemp, realpath, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { initialStartupState, StartupStateStore } from "../config/index.ts";
-import { FakeEmbeddingProvider } from "../indexing/index.ts";
+import { type EmbeddingProvider, FakeEmbeddingProvider } from "../indexing/index.ts";
 import { indexableFile, indexingConfig } from "../indexing/test-helpers.ts";
 import { err, ok } from "../shared/result.ts";
 import { ApplicationEventHub } from "./progress.ts";
@@ -91,18 +91,50 @@ describe("application lifecycle", () => {
   test("composes production service ownership and cleans up every failed startup stage", async () => {
     const { config } = setup();
     const success = adapters(config);
+    let onlinePolicy: Parameters<EmbeddingProvider["warmUp"]>[0];
+    (success.services.embeddings as EmbeddingProvider).warmUp = async (options) => {
+      onlinePolicy = options;
+      return ok(undefined);
+    };
     const created = await createProductionServices(
       config,
       new AbortController().signal,
       success.value,
     );
     expect(created.ok).toBe(true);
+    expect(onlinePolicy).toMatchObject({
+      allowDownload: true,
+      downloadRetries: 2,
+      recoverCorruptAssets: true,
+    });
     if (created.ok) {
       created.value.closeSearch();
       created.value.store.close();
       await created.value.embeddings.shutdown();
     }
     expect(success.retrieverCloses.value).toBe(1);
+
+    const offlineConfig = { ...config, offline: true };
+    const offline = adapters(offlineConfig);
+    let offlinePolicy: Parameters<EmbeddingProvider["warmUp"]>[0];
+    (offline.services.embeddings as EmbeddingProvider).warmUp = async (options) => {
+      offlinePolicy = options;
+      return ok(undefined);
+    };
+    const offlineCreated = await createProductionServices(
+      offlineConfig,
+      new AbortController().signal,
+      offline.value,
+    );
+    expect(offlinePolicy).toMatchObject({
+      allowDownload: false,
+      recoverCorruptAssets: false,
+    });
+    if (offlineCreated.ok) {
+      offlineCreated.value.closeSearch();
+      offlineCreated.value.store.close();
+      await offlineCreated.value.embeddings.shutdown();
+    }
 
     const cancelled = adapters(config);
     const cancelledController = new AbortController();

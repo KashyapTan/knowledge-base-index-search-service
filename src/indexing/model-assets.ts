@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { createReadStream } from "node:fs";
 import { lstat, mkdir, readdir, readFile, realpath, rename, writeFile } from "node:fs/promises";
-import { dirname, join, relative, resolve, sep } from "node:path";
+import { basename, dirname, join, relative, resolve, sep } from "node:path";
 import { err, ok, type Result } from "../shared/result.ts";
 import type { EmbeddingError, EmbeddingIdentity } from "./contracts.ts";
 
@@ -21,6 +21,11 @@ interface AssetManifest {
   readonly quantization: string;
   readonly files: readonly AssetRecord[];
 }
+
+export type ModelAssetInspection =
+  | { readonly state: "missing"; readonly message: string }
+  | { readonly state: "ready"; readonly files: number }
+  | { readonly state: "corrupt"; readonly message: string };
 
 function failure(message: string): Result<never, EmbeddingError> {
   return err({ code: "MODEL_ASSETS_INVALID", message });
@@ -128,22 +133,68 @@ async function verifyManifest(
   }
 }
 
+export async function inspectModelAssets(
+  cacheDir: string,
+  identity: EmbeddingIdentity,
+): Promise<ModelAssetInspection> {
+  const manifestPath = join(cacheDir, MANIFEST_NAME);
+  let text: string;
+  try {
+    text = await readFile(manifestPath, "utf8");
+  } catch (error) {
+    return error instanceof Error && "code" in error && error.code === "ENOENT"
+      ? {
+          state: "missing",
+          message: "Local model assets have not been prepared yet.",
+        }
+      : {
+          state: "corrupt",
+          message: "The cached model asset manifest could not be read.",
+        };
+  }
+  const manifest = parseManifest(text);
+  if (!manifest) {
+    return { state: "corrupt", message: "The cached model asset manifest is malformed." };
+  }
+  const verified = await verifyManifest(cacheDir, manifest, identity);
+  return verified.ok
+    ? { state: "ready", files: manifest.files.length }
+    : { state: "corrupt", message: verified.error.message };
+}
+
+export async function quarantineModelCache(
+  cacheDir: string,
+): Promise<Result<string | undefined, EmbeddingError>> {
+  try {
+    const info = await lstat(cacheDir).catch((error: unknown) => {
+      if (error instanceof Error && "code" in error && error.code === "ENOENT") return undefined;
+      throw error;
+    });
+    if (!info) {
+      await mkdir(cacheDir, { recursive: true });
+      return ok(undefined);
+    }
+    const backup = join(
+      dirname(cacheDir),
+      `${basename(cacheDir)}.corrupt-${new Date().toISOString().replaceAll(/[:.]/gu, "-")}-${crypto.randomUUID()}`,
+    );
+    await rename(cacheDir, backup);
+    await mkdir(cacheDir, { recursive: true });
+    return ok(backup);
+  } catch {
+    return failure("The corrupt model cache could not be preserved for recovery.");
+  }
+}
+
 export async function verifyOrWriteModelAssetManifest(
   cacheDir: string,
   identity: EmbeddingIdentity,
   mode: "verify" | "write-if-missing",
 ): Promise<Result<void, EmbeddingError>> {
   const manifestPath = join(cacheDir, MANIFEST_NAME);
-  try {
-    const text = await readFile(manifestPath, "utf8");
-    const manifest = parseManifest(text);
-    if (!manifest) return failure("The cached model asset manifest is malformed.");
-    return verifyManifest(cacheDir, manifest, identity);
-  } catch (error) {
-    if (!(error instanceof Error && "code" in error && error.code === "ENOENT")) {
-      return failure("The cached model asset manifest could not be read.");
-    }
-  }
+  const inspection = await inspectModelAssets(cacheDir, identity);
+  if (inspection.state === "ready") return ok(undefined);
+  if (inspection.state === "corrupt") return failure(inspection.message);
   if (mode === "verify") return ok(undefined);
   try {
     await mkdir(cacheDir, { recursive: true });
