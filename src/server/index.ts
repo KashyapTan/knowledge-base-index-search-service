@@ -1,9 +1,28 @@
 import { isAbsolute, relative, resolve } from "node:path";
+import {
+  type AppConfig,
+  type CompatibilityAssessment,
+  type CompatibilityError,
+  type ConfigurationError,
+  LOOPBACK_HOST,
+  type LoadAppConfigOptions,
+  loadAppConfig,
+  type PortSelection,
+  readCompatibilityMetadata,
+  selectAvailableLoopbackPort,
+} from "../config/index.ts";
+import { err, ok, type Result } from "../shared/result.ts";
 
 export interface FoundationServerOptions {
-  readonly hostname?: string;
   readonly port?: number;
   readonly uiDistDir?: string;
+}
+
+export interface ConfiguredFoundationServer {
+  readonly compatibility: CompatibilityAssessment;
+  readonly config: AppConfig;
+  readonly portSelection: PortSelection;
+  readonly server: Bun.Server<undefined>;
 }
 
 const defaultUiDistDir = resolve(import.meta.dir, "../../dist/ui");
@@ -37,11 +56,10 @@ async function serveUi(pathname: string, uiDistDir: string): Promise<Response> {
 export function createFoundationServer(
   options: FoundationServerOptions = {},
 ): Bun.Server<undefined> {
-  const hostname = options.hostname ?? "127.0.0.1";
   const uiDistDir = resolve(options.uiDistDir ?? defaultUiDistDir);
 
   return Bun.serve({
-    hostname,
+    hostname: LOOPBACK_HOST,
     port: options.port ?? 3210,
     async fetch(request) {
       const url = new URL(request.url);
@@ -53,7 +71,49 @@ export function createFoundationServer(
   });
 }
 
+export async function startConfiguredFoundationServer(
+  options: LoadAppConfigOptions = {},
+): Promise<Result<ConfiguredFoundationServer, ConfigurationError | CompatibilityError>> {
+  const loaded = await loadAppConfig(options);
+  if (!loaded.ok) return loaded;
+  const compatibility = await readCompatibilityMetadata(
+    loaded.value.paths.compatibilityFile,
+    loaded.value.compatibility,
+  );
+  if (!compatibility.ok) return compatibility;
+  const portSelection = await selectAvailableLoopbackPort(loaded.value.server.port);
+  if (!portSelection.ok) return portSelection;
+
+  try {
+    const server = createFoundationServer({ port: portSelection.value.port });
+    return ok({
+      compatibility: compatibility.value,
+      config: loaded.value,
+      portSelection: portSelection.value,
+      server,
+    });
+  } catch {
+    return err({
+      code: "SERVER_START_FAILED",
+      message: "The local HTTP server could not be started on the selected loopback port.",
+      details: { port: portSelection.value.port },
+    });
+  }
+}
+
 if (import.meta.main) {
-  const server = createFoundationServer();
-  console.info(`KBISS foundation server listening at ${server.url}`);
+  const startup = await startConfiguredFoundationServer();
+  if (!startup.ok) {
+    console.error(`[${startup.error.code}] ${startup.error.message}`);
+    process.exitCode = 1;
+  } else {
+    if (startup.value.portSelection.usedFallback) {
+      console.info(
+        `Port ${startup.value.portSelection.preferredPort} was busy; using ${startup.value.portSelection.port}.`,
+      );
+    }
+    console.info(
+      `KBISS foundation server listening at ${startup.value.server.url} (${startup.value.compatibility.status})`,
+    );
+  }
 }

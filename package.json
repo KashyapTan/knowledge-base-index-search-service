@@ -16,6 +16,7 @@
     "lint": "biome check .",
     "format": "biome format --write .",
     "test": "\"$npm_execpath\" test",
+    "test:coverage": "\"$npm_execpath\" test --coverage --coverage-reporter=text",
     "compat": "\"$npm_execpath\" run build:ui && \"$npm_execpath\" run scripts/compatibility-check.ts"
   },
   "dependencies": {

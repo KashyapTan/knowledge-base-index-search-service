@@ -1,9 +1,9 @@
 # Knowledge Base Index Search Service
 
-KBISS is a local-only search application for the `card-gateway-artifacts` repository. This
-repository currently contains the Plan 1 foundation: a Bun server, a compiled React/Vite shell,
-shared TypeScript conventions, and a disposable native-runtime compatibility check. Production
-indexing and search intentionally begin in later plans.
+KBISS is a local-only search application for the `card-gateway-artifacts` repository. The current
+implementation includes the Bun/React foundation plus validated runtime configuration, external
+per-user state layout, index compatibility checks, observable startup-state contracts, and
+loopback port selection. Production indexing and search intentionally begin in later plans.
 
 ## Requirements
 
@@ -20,9 +20,22 @@ bun run compat
 bun run serve
 ```
 
-`bun run serve` builds the UI and starts a skeletal loopback server at
-`http://127.0.0.1:3210`. It does not yet open the browser or index a repository; those lifecycle
-features belong to later plans.
+`bun run serve` validates the source root, prepares external per-user state, builds the UI, and
+starts a skeletal loopback server at `http://127.0.0.1:3210`. If that port is busy, KBISS searches
+the next loopback ports and reports the selected one. It does not yet open the browser or index a
+repository; those lifecycle features belong to later plans.
+
+The source repository defaults to `~/dev/card-gateway-artifacts`. Override it without modifying
+the project:
+
+```sh
+bun run serve --root /path/to/card-gateway-artifacts --port 3210
+```
+
+Configuration precedence is command-line options, `KBISS_*` environment variables, the per-user
+`config.json`, then defaults. See [Plan 2 runtime configuration](docs/plan-02-runtime-configuration.md)
+for every setting and the OS-specific state layout. KBISS never creates the source root and never
+writes indexes or model assets into either repository.
 
 ## Scripts
 
@@ -35,6 +48,7 @@ features belong to later plans.
 | `bun run lint` | Check formatting and lint rules with Biome. |
 | `bun run format` | Apply the repository formatter. |
 | `bun test` | Run focused Bun tests. |
+| `bun run test:coverage` | Run Bun tests with line and function coverage. |
 | `bun run compat` | Exercise LanceDB, BGE inference, Bun Workers, HTTP, and Vite together. |
 
 ## Module boundaries
@@ -42,7 +56,7 @@ features belong to later plans.
 ```text
 src/
   server/       Bun HTTP lifecycle and API (foundation route only in Plan 1)
-  config/       validated runtime configuration (Plan 2)
+  config/       validated runtime configuration and local-state contracts
   discovery/    source scanning and watching (Plan 3)
   extraction/   text extraction and chunking (Plan 4)
   indexing/     embedding worker boundary and later persistence pipeline
@@ -55,5 +69,6 @@ The project uses tagged `Result<T, AppError>` values for expected failures at mo
 Thrown exceptions remain appropriate for programmer errors and unrecoverable startup failures;
 later plans should translate displayable failures into structured `AppError` values.
 
-See [Plan 1 compatibility notes](docs/plan-01-compatibility.md) for pinned native imports,
-worker protocol details, and the verified support matrix.
+See [Plan 1 compatibility notes](docs/plan-01-compatibility.md) for pinned native imports and the
+worker boundary, and [Plan 2 runtime configuration](docs/plan-02-runtime-configuration.md) for the
+configuration and persisted-state contracts consumed by later plans.

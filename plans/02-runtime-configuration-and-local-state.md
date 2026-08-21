@@ -96,3 +96,34 @@ Target approximately 93% line and function coverage for the non-trivial configur
 ## Handoff
 
 Plan 03 consumes `AppConfig`, `ResolvedPaths`, and startup-state reporting to discover files and maintain a change manifest.
+
+## Completion notes (2026-08-20)
+
+- Added a single async configuration loader with strict CLI/environment/user-file/default
+  precedence. It expands `~` from the OS home API, canonicalizes the one configured source root,
+  validates root readability and model/port inputs, and returns structured display-safe failures.
+- Defined and exported the Plan 2 contracts: `AppConfig`, `ResolvedPaths`, `IndexCompatibility`,
+  `StartupState`, their supporting types, and the observable transition store. `sourceRoots` is a
+  one-element tuple so downstream code will not need an API or persisted-ID redesign for future
+  multi-root support.
+- Added OS-specific config/state/cache resolution for macOS, Linux/XDG, and Windows. State, model
+  cache, metadata, optional logs, and LanceDB paths are separate, canonicalized before creation,
+  and rejected if symlinks or overrides place generated data inside the source or project repo.
+- Namespaced source roots, compatible indexes, and model caches with opaque stable hashes. Index
+  identity covers canonical root, model/quantization/dimension/normalization, schema,
+  extractor/chunker versions, and chunk policy; no absolute root is persisted in a filename or
+  compatibility descriptor.
+- Added atomic compatibility metadata persistence and startup classification for `compatible`,
+  `migration-required`, `rebuild-required`, and `corrupt`. Every index-affecting change, including
+  model or vector dimensions, is classified before LanceDB use.
+- Made server startup consume the validated configuration, assess compatibility metadata, remain
+  fixed to `127.0.0.1`, and search up to 20 consecutive loopback ports when the preferred port is
+  occupied. Unexpected port failures remain structured errors and never trigger a network-interface
+  fallback.
+- Added deterministic temporary-filesystem and real-socket tests for precedence, path shapes,
+  symlinks, missing/unreadable roots, unsafe state, stable hashing, metadata corruption and all
+  compatibility differences, startup transitions, occupied ports, configured server startup, and
+  safe asset routing. The completed suite has 79 passing tests and reports 97.53% line and 100%
+  function coverage for loaded application code.
+- Full contracts, paths, configuration keys, classification rules, and Plan 3 guidance are recorded
+  in `docs/plan-02-runtime-configuration.md`.
