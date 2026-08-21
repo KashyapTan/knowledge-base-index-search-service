@@ -1,9 +1,10 @@
 import type { DataType } from "@huggingface/transformers";
+import { DEFAULT_EMBEDDING_CONFIG } from "../config/defaults.ts";
 
 export const PROVISIONAL_EMBEDDING_MODEL = {
-  id: "Xenova/bge-small-en-v1.5",
-  dtype: "q8" satisfies DataType,
-  dimension: 384,
+  id: DEFAULT_EMBEDDING_CONFIG.modelId,
+  dtype: DEFAULT_EMBEDDING_CONFIG.quantization satisfies DataType,
+  dimension: DEFAULT_EMBEDDING_CONFIG.vectorDimension,
   pooling: "mean",
   normalize: true,
 } as const;
