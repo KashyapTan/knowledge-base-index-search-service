@@ -32,7 +32,44 @@ h1 {
   line-height: 0.98;
 }
 
+h2 {
+  margin: 0.25rem 0 0.5rem;
+  font-size: clamp(1.5rem, 4vw, 2.4rem);
+  text-transform: capitalize;
+}
+
 p {
   max-width: 58ch;
   line-height: 1.6;
+}
+
+.status {
+  padding: 1.25rem 1.5rem;
+  border: 1px solid #b8c8bd;
+  border-radius: 0.75rem;
+  background: #fbfaf5;
+  box-shadow: 0 0.5rem 2rem rgb(23 33 27 / 8%);
+}
+
+.status-error {
+  border-color: #ad615b;
+  background: #fff7f5;
+}
+
+.status-label {
+  margin: 0;
+  color: #3b6b51;
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.connection-error {
+  color: #88403b;
+}
+
+.handoff {
+  color: #526258;
+  font-size: 0.92rem;
 }

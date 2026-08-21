@@ -8,10 +8,10 @@
     "bun": "1.4.0"
   },
   "scripts": {
-    "dev": "\"$npm_execpath\" run build:ui && \"$npm_execpath\" --hot src/server/index.ts",
+    "dev": "\"$npm_execpath\" run build:ui && \"$npm_execpath\" --hot src/server/cli.ts",
     "build": "\"$npm_execpath\" run build:ui && \"$npm_execpath\" run typecheck",
     "build:ui": "vite build",
-    "serve": "\"$npm_execpath\" run build:ui && \"$npm_execpath\" run src/server/index.ts",
+    "serve": "\"$npm_execpath\" run build:ui && \"$npm_execpath\" run src/server/cli.ts",
     "typecheck": "tsc --noEmit",
     "lint": "biome check .",
     "model:setup": "\"$npm_execpath\" run scripts/setup-model.ts",

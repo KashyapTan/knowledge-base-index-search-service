@@ -90,7 +90,7 @@ export class DiscoveryWatcher {
     this.#onError = options.onError;
   }
 
-  async start(): Promise<void> {
+  async start(options: { readonly scanInitially?: boolean } = {}): Promise<void> {
     if (this.#running) return;
     this.#running = true;
     this.#lastClockCheck = this.#scheduler.now();
@@ -106,7 +106,7 @@ export class DiscoveryWatcher {
       () => this.#periodicCheck(),
       this.#reconciliationIntervalMs,
     );
-    await this.#runScan("scan");
+    if (options.scanInitially !== false) await this.#runScan("scan");
   }
 
   stop(): void {
