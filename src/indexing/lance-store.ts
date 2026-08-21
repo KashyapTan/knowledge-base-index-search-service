@@ -462,7 +462,11 @@ export class LanceIndexStore implements IndexStore {
       const count = await this.#chunks.countRows();
       if (count === 0) return ok(undefined);
       await this.#chunks.createIndex("search_text", {
-        config: lancedb.Index.fts({ stem: false, removeStopWords: false }),
+        config: lancedb.Index.fts({
+          withPosition: true,
+          stem: false,
+          removeStopWords: false,
+        }),
         replace: true,
       });
       for (const column of ["file_id", "chunk_id", "relative_path", "filename"]) {

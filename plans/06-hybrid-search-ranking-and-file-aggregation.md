@@ -78,3 +78,27 @@ Target approximately 93% line and function coverage for non-trivial query, candi
 ## Handoff
 
 Plan 07 exposes the search service, file access, progress state, and lifecycle through a secure loopback-only Bun API.
+
+## Completion notes (2026-08-21)
+
+- Added typed request, response, result-file, excerpt, timing, cancellation, error, candidate, and
+  retriever contracts. Query normalization trims only surrounding whitespace and validates bounded
+  counts/filters while preserving quotes, casing, punctuation, paths, and code identifiers.
+- Added explicit validated search tuning for independent vector/BM25/metadata pools, vector distance,
+  metadata fuzziness, RRF constant/source weights, excerpt limits, and capped file-score contribution.
+- Added a compatibility-gated LanceDB retriever with cosine vector search, native BM25 and positional
+  phrase queries, a version-invalidated lightweight metadata catalog, exact/prefix/substring/fuzzy
+  filename/path/heading/symbol matching, format filters, committed-file hash validation, and empty-index
+  handling. Vector search deliberately includes unindexed fragments.
+- Updated Plan 5 FTS refresh to store token positions so quoted error messages use real phrase search.
+- Added source-scale-independent weighted RRF, competition ranks for ties, duplicate-source handling,
+  stable tie breaks, file grouping, strongest-chunk-first scoring, a bounded anti-crowding bonus, and
+  diverse display-only excerpts with accurate navigation metadata and safe literal highlight terms.
+- Added cancellation propagation through query inference and retrieval, with checks that prevent stale
+  results from reaching callers even when a bounded native query finishes after cancellation.
+- Added 48 Plan 6 tests covering query preservation/validation, tuning validation, RRF math/ties/empty
+  pools/raw-scale conflicts, exact metadata boosts, adversarial large files, distinct-file limits,
+  diverse excerpts, filters, cancellation, and real temporary-LanceDB semantic/BM25/exact/quoted/mixed/
+  no-result behavior. Search logic reports 100% line coverage and 97.6-100% function coverage.
+- The complete public contract, defaults, ranking rules, lifecycle ownership, and Plan 7 handoff are
+  recorded in `docs/plan-06-hybrid-search.md`.
