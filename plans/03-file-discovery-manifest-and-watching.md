@@ -87,3 +87,34 @@ Target approximately 93% line and function coverage for non-trivial scanner, fin
 ## Handoff
 
 Plan 04 consumes `DiscoveredFile` records and turns supported file content into normalized, line-addressable chunks.
+
+## Completion notes (2026-08-20)
+
+- Added the exported Plan 3 contracts and a composed discovery service. Stable file IDs use the
+  opaque Plan 2 root identity plus an NFC-normalized root-relative path; absolute paths and local
+  filesystem identities never participate in portable IDs.
+- Added stable recursive traversal with bounded fingerprint concurrency, explicit glob ignores,
+  `.git` exclusion, hidden-file inclusion, canonical directory handles, symlink-cycle detection,
+  out-of-root rejection, and file-handle revalidation against canonicalization races.
+- Added the complete required extension map plus strict streamed UTF-8/plain-text detection for
+  extensionless and unfamiliar files. Empty, malformed, binary, unreadable, unsafe, and large files
+  are isolated into typed records without aborting a scan.
+- Added metadata-first incremental comparison with nanosecond timestamp/change metadata,
+  filesystem identity where available, coarse-timestamp safeguards, and streaming SHA-256 hashes.
+  Scans classify adds, content changes, metadata-only changes, unchanged files, deletions, and
+  failures; renames intentionally remain delete-plus-add.
+- Added an interface-backed JSON manifest under `ResolvedPaths.indexMetadataDir`. Mode-`0600`
+  pending writes are atomically renamed, complete interrupted writes are promoted, partial writes
+  are discarded, and corrupt state is safely rebuilt by reconciliation. Snapshot subscribers are
+  notified only after persistence and only for actionable changes.
+- Added native recursive watching with debounce/coalescing, authoritative re-stat scans, serialized
+  in-flight work, periodic reconciliation, overflow/error recovery, and sleep/clock-drift recovery.
+  Injected watch and scheduler adapters make timing behavior deterministic in tests.
+- Added temporary-filesystem tests for every required format family, extensionless/hidden/ignored/
+  empty/large/malformed/binary/unreadable files, deterministic order and IDs, incremental change
+  classes, atomic saves, duplicate events, lost events, manifest recovery, state exclusion, and real
+  in-root/out-of-root/cyclic symlinks. Full validation passes with 138 tests and reports 98.32% line
+  and 99.29% function coverage for loaded application code; discovery code is 99%+ line coverage
+  overall, with scanner function coverage at 95.56%.
+- The complete persistence, change, watcher, ignore, and Plan 4 handoff contracts are recorded in
+  `docs/plan-03-file-discovery.md`.

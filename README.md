@@ -1,9 +1,10 @@
 # Knowledge Base Index Search Service
 
 KBISS is a local-only search application for the `card-gateway-artifacts` repository. The current
-implementation includes the Bun/React foundation plus validated runtime configuration, external
-per-user state layout, index compatibility checks, observable startup-state contracts, and
-loopback port selection. Production indexing and search intentionally begin in later plans.
+implementation includes the Bun/React foundation, validated runtime configuration, external
+per-user state layout, index compatibility checks, and a resumable file-discovery manifest with
+safe recursive watching. Semantic extraction, indexing, and search intentionally begin in later
+plans.
 
 ## Requirements
 
@@ -22,8 +23,8 @@ bun run serve
 
 `bun run serve` validates the source root, prepares external per-user state, builds the UI, and
 starts a skeletal loopback server at `http://127.0.0.1:3210`. If that port is busy, KBISS searches
-the next loopback ports and reports the selected one. It does not yet open the browser or index a
-repository; those lifecycle features belong to later plans.
+the next loopback ports and reports the selected one. The discovery subsystem is ready for later
+indexing lifecycle integration, but this command does not yet open the browser or build an index.
 
 The source repository defaults to `~/dev/card-gateway-artifacts`. Override it without modifying
 the project:
@@ -57,7 +58,7 @@ writes indexes or model assets into either repository.
 src/
   server/       Bun HTTP lifecycle and API (foundation route only in Plan 1)
   config/       validated runtime configuration and local-state contracts
-  discovery/    source scanning and watching (Plan 3)
+  discovery/    deterministic scanning, manifest persistence, and reconciled watching
   extraction/   text extraction and chunking (Plan 4)
   indexing/     embedding worker boundary and later persistence pipeline
   search/       hybrid retrieval and aggregation (Plan 6)
@@ -71,4 +72,6 @@ later plans should translate displayable failures into structured `AppError` val
 
 See [Plan 1 compatibility notes](docs/plan-01-compatibility.md) for pinned native imports and the
 worker boundary, and [Plan 2 runtime configuration](docs/plan-02-runtime-configuration.md) for the
-configuration and persisted-state contracts consumed by later plans.
+configuration and persisted-state contracts. See
+[Plan 3 file discovery](docs/plan-03-file-discovery.md) for inventory, change, manifest, ignore, and
+watcher contracts consumed by extraction and indexing.
