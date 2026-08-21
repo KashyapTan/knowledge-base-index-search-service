@@ -75,6 +75,14 @@ Leave typed definitions for:
 
 These contracts must not import UI-specific types.
 
+## Testing requirements
+
+Add deterministic Bun tests in this phase rather than deferring configuration coverage to Plan 11. Cover configuration precedence, CLI/environment restoration, home-directory expansion, canonicalization, root overrides, default selection, state-directory resolution, stable namespace hashing, model/schema compatibility classification, missing or unreadable roots, corrupt metadata, and occupied-port behavior.
+
+Use isolated temporary home/state/root directories and restore all mutated environment and process state after each test. Include table-driven tests across supported path shapes and operating-system abstractions without hardcoding one developer's machine. Exercise any persisted compatibility descriptor with real temporary files, not only mocks.
+
+Target approximately 93% line and function coverage for the non-trivial configuration, path, compatibility, and startup-state code introduced by this plan, with direct coverage of all security- or rebuild-relevant branches. Generated types and trivial entrypoint wiring may be narrowly excluded with justification. Run the coverage suite, typecheck, lint, and existing checks before handoff.
+
 ## Acceptance criteria
 
 - Default and overridden roots resolve consistently across supported operating systems.
@@ -83,8 +91,8 @@ These contracts must not import UI-specific types.
 - Model or vector-dimension changes are detected before database use.
 - Missing/unreadable roots and port conflicts produce actionable structured errors.
 - The server remains loopback-only.
+- Phase-specific tests pass and the non-trivial code added here is at or near the project's 93% coverage target without artificial coverage padding.
 
 ## Handoff
 
 Plan 03 consumes `AppConfig`, `ResolvedPaths`, and startup-state reporting to discover files and maintain a change manifest.
-

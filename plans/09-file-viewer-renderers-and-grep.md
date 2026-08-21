@@ -57,6 +57,14 @@ Links in Markdown or HTML should open only validated HTTP/HTTPS destinations in 
 
 If the watcher reports that an open file changed or disappeared, display a non-destructive notice and allow refresh/close. Do not mix old grep offsets with new content silently.
 
+## Testing requirements
+
+Add unit tests for renderer selection, format metadata, literal/regex/case grep, Unicode, overlapping and zero-width matches, invalid regex, navigation wraparound, source offsets, stale-search cancellation, and changed/deleted-file state. Add component/browser tests for modal focus trapping/restoration, Escape/Back behavior, result-line navigation, source/preview switching, copy behavior, keyboard shortcuts, match highlighting, and large-file responsiveness.
+
+Maintain malicious fixtures for Markdown and HTML containing scripts, event handlers, forms, popups, iframes, remote assets, `javascript:`, `file:`, data URLs, and attempts to access the parent origin. Assert sanitization, sandbox flags, CSP behavior, and safe external-link attributes in an actual browser where DOM behavior matters. Do not rely only on serialized markup snapshots for XSS protection.
+
+Target approximately 93% line and function coverage for non-trivial viewer state, renderer selection, sanitization integration, grep, navigation, and link-policy code. Cover every safety-relevant branch regardless of aggregate coverage. Run coverage, typecheck, lint, production build, and existing checks before handoff.
+
 ## Acceptance criteria
 
 - Markdown is attractive, sanitized, and faithful to common GFM content.
@@ -66,8 +74,8 @@ If the watcher reports that an open file changed or disappeared, display a non-d
 - Opening from a result navigates to the matching source area.
 - Unsafe URL schemes and arbitrary local paths cannot be opened.
 - Large files remain usable without freezing the page.
+- Viewer, grep, and content-safety tests keep non-trivial code at or near 93% meaningful coverage.
 
 ## Handoff
 
 Plan 10 turns the integrated product into a dependable teammate-facing local command with model setup, state operations, documentation, and production polish.
-

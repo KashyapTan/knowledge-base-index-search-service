@@ -58,6 +58,14 @@ Review startup messages, progress estimates, browser titles/icons, empty states,
 
 Write a concise README covering purpose, privacy model, prerequisites, installation, `serve`, root overrides, local storage, supported formats, troubleshooting, and safe reset/reindex behavior.
 
+## Testing requirements
+
+Add process-level tests around argument handling, root overrides, model setup states, browser-open-once behavior, production asset serving, diagnostics, schema-upgrade decisions, and exact reset/rebuild targets. Use temporary application-data and source roots so operational tests can prove that no command writes to or deletes unrelated paths.
+
+Create clean-environment smoke workflows for `bun install`, the production build, `bun run serve`, first model setup with a controlled local asset source, and a fully offline restart using the populated cache. Exercise missing/corrupt model recovery, busy ports, incompatible indexes, interrupted rebuilds, and supported platform/architecture checks. Do not require or mutate a developer's real artifact repository.
+
+Target approximately 93% line and function coverage for non-trivial setup, operational-command, migration, reset, asset-serving, and lifecycle orchestration code. Minimal command entrypoints and static assets may be excluded narrowly while their observable behavior remains covered by process tests. Run the complete coverage suite, typecheck, lint, production build, and all existing checks before handoff.
+
 ## Acceptance criteria
 
 - A teammate can go from a clean clone to a usable browser app with documented Bun commands.
@@ -67,8 +75,8 @@ Write a concise README covering purpose, privacy model, prerequisites, installat
 - Updates detect incompatible indexes and recover with actionable messaging.
 - No database/model/generated frontend cache dirties the source or application repositories.
 - Documentation accurately reflects supported platforms, paths, formats, and privacy behavior.
+- Operational and distribution tests pass, and suite coverage remains at or near 93% for non-trivial, testable code.
 
 ## Handoff
 
 Plan 11 is the final phase. It validates correctness, security, relevance, and performance against fixtures and the user-designated large external repository, then makes the evidence-based small-versus-base embedding decision.
-

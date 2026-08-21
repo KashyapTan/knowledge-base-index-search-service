@@ -62,6 +62,14 @@ Never accept an arbitrary absolute path from the browser. Treat symlink changes 
 
 Handle termination signals and graceful shutdown: stop watching, stop accepting new indexing work, finish or checkpoint safe writes, close workers, and release LanceDB handles.
 
+## Testing requirements
+
+Start the real Bun server on an ephemeral loopback port for API integration tests. Cover route/method validation, structured errors, status transitions, SSE connection/reconnection and event ordering, search cancellation, file streaming, SPA fallback, manual reconciliation, startup failures, concurrent-instance behavior, and graceful shutdown with in-flight work.
+
+Treat security tests as mandatory branches: forged IDs, traversal encodings, null bytes, oversized inputs, symlink swaps, files deleted between lookup and read, unexpected Host headers, cross-origin requests, state-changing request protection, unsafe content types, and stack/path leakage. Do not mock filesystem canonicalization in the tests intended to validate containment.
+
+Target approximately 93% line and function coverage for non-trivial routing, validation, lifecycle, SSE, error mapping, and security code. Every path-containment and cross-origin decision branch should be explicitly tested even if overall coverage already exceeds the target. Run coverage, typecheck, lint, build, and existing checks before handoff.
+
 ## Acceptance criteria
 
 - One Bun process serves the API and built frontend on loopback only.
@@ -71,8 +79,8 @@ Handle termination signals and graceful shutdown: stop watching, stop accepting 
 - Unexpected Host/CORS access is rejected.
 - Shutdown leaves a recoverable index.
 - Initial indexing does not delay access to the progress/error UI.
+- API and security tests pass at or near 93% meaningful coverage for the non-trivial code added here.
 
 ## Handoff
 
 Plan 08 builds the primary React search experience against these stable API contracts.
-

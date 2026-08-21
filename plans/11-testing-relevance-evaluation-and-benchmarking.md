@@ -4,7 +4,7 @@
 
 Finish the build with comprehensive automated testing, security regression coverage, corpus-specific relevance evaluation, and reproducible performance benchmarks using both controlled fixtures and the user's large external repository.
 
-This is intentionally the final implementation plan. It validates the integrated behavior produced by Plans 01-10 and feeds only evidence-backed tuning changes back into the product.
+This is intentionally the final implementation plan. Plans 02-10 already add phase-specific tests; this phase closes remaining coverage gaps, validates the integrated behavior, and feeds only evidence-backed tuning changes back into the product.
 
 ## Dependencies
 
@@ -17,6 +17,14 @@ The exact path of the user's large project may be supplied at execution time. Ne
 ### Test layers
 
 Build a balanced suite using Bun's test runner where appropriate and Playwright for browser behavior:
+
+### Coverage governance
+
+Generate a suite-wide coverage report and bring non-trivial, testable application code to approximately 93% line and function coverage, with meaningful branch coverage for decision-heavy code. Treat this as a quality target rather than a reason to add low-value tests or manipulate source layout.
+
+Review all exclusions added by earlier phases. Allow only narrow exclusions for generated code, type-only declarations, static assets/styles, native third-party internals, and minimal bootstrap glue; document why each excluded path cannot provide useful application-level coverage. Do not exclude difficult security, error-recovery, concurrency, or ranking branches merely to reach the number.
+
+Use the report to identify behavior gaps, then add tests that assert outcomes and invariants. Critical path-safety, sanitization, incremental-index correctness, ranking, cancellation, and destructive-operation safeguards require direct tests regardless of aggregate coverage.
 
 #### Unit coverage
 
@@ -144,6 +152,7 @@ The release gate should require:
 - Relevance metrics and known limitations are documented.
 - Performance measurements have no unexplained severe regression.
 - The final embedding model decision is recorded with evidence.
+- The final report shows approximately 93% line and function coverage for non-trivial, testable application code, with every exclusion reviewed and justified.
 
 ## Acceptance criteria
 
@@ -153,4 +162,4 @@ The release gate should require:
 - BGE small and base are compared under identical corpus/chunk/ranking conditions.
 - The final model, chunk policy, fusion settings, and index strategy are selected from recorded results.
 - A repeatable baseline report and release gate exist for future agents.
-
+- Suite-wide coverage is approximately 93% for non-trivial code without low-value padding, and critical branches have explicit behavioral tests.

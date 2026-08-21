@@ -60,6 +60,14 @@ Support keyboard navigation through results, visible focus, semantic controls, s
 
 Use the smallest appropriate state management approach. Make query/top-X state shareable in the URL if it does not leak sensitive data into unwanted browser history; otherwise document the privacy tradeoff. A selected file may use route/modal state so refresh and Back behavior remain predictable.
 
+## Testing requirements
+
+Add React component and hook tests for startup states, progress updates, partial-index messaging, query submission, Enter behavior, debounce timing, stale-request cancellation, top-X changes, result grouping, excerpt expansion, loading/no-results/error states, URL state if enabled, and long-path/large-excerpt rendering. Use fake timers and deterministic API/SSE adapters rather than real timeouts.
+
+Add focused Playwright coverage for the critical keyboard flow: load, focus search, submit, move through distinct-file results, expand excerpts, and open a file. Include accessibility assertions for names, focus order, visible focus, status announcements, reduced motion, and contrast-relevant states. Mock APIs only for UI-state isolation; retain at least one contract-level browser smoke path against the real local API.
+
+Target approximately 93% line and function coverage for non-trivial UI state, hooks, reducers, request coordination, and result-presentation logic. Static styling, generated API types, and trivial visual wrappers may be excluded narrowly; important interaction branches may not. Run coverage, typecheck, lint, production build, and existing checks before handoff.
+
 ## Acceptance criteria
 
 - A teammate can understand whether results are complete and can search during background indexing.
@@ -68,8 +76,8 @@ Use the smallest appropriate state management approach. Make query/top-X state s
 - All primary search operations work with keyboard and assistive technology.
 - The UI has no runtime dependency on external assets or services.
 - Large result excerpts and long paths do not break the layout.
+- UI tests cover critical behavior and keep non-trivial, testable frontend logic at or near the 93% coverage target.
 
 ## Handoff
 
 Plan 09 implements the full-file modal/viewer and its renderer-specific grep behavior.
-

@@ -54,6 +54,14 @@ Prepare full-text indexing on searchable text and metadata required by Plan 06. 
 
 Publish phase, file counts, chunk counts, batching progress, estimated completion when credible, and per-file error summaries. Never include entire file contents in logs/events.
 
+## Testing requirements
+
+Use a deterministic fake embedding provider for most unit and integration tests so dimensions, similarity, errors, cancellation, and batch behavior are reproducible without network or large model costs. Add temporary-LanceDB integration tests for schema creation, vector-dimension enforcement, file/chunk persistence, unchanged-chunk reuse, logical per-file replacement, deletion, idempotent retry, progress accounting, incompatible metadata, interrupted work, and resume without duplicate or half-committed state.
+
+Maintain a separate opt-in/local-assets smoke test that loads the pinned quantized BGE-small model under Bun, produces normalized vectors of the expected dimension, and proves remote model loading is disabled once assets are available. Exercise the real worker or subprocess boundary, shutdown, backpressure, and cancellation rather than mocking all concurrency behavior.
+
+Target approximately 93% line and function coverage for non-trivial provider orchestration, queueing, schema, incremental-update, recovery, and progress code. Native library internals and minimal adapter glue may be excluded, but the application's handling of their success/failure must be covered. Run coverage, typecheck, lint, and existing checks before handoff.
+
 ## Acceptance criteria
 
 - Indexing uses only local model inference after model setup.
@@ -63,8 +71,8 @@ Publish phase, file counts, chunk counts, batching progress, estimated completio
 - Interrupted work can resume without duplicate or half-committed file state.
 - Model/dimension/chunker incompatibility triggers a controlled rebuild path.
 - LanceDB state remains outside both repositories.
+- Indexing tests pass at or near 93% meaningful coverage for the non-trivial application code introduced in this phase.
 
 ## Handoff
 
 Plan 06 builds retrieval and ranking over the persisted file/chunk schema and query-embedding provider.
-

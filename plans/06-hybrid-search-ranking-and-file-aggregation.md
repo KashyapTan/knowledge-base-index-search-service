@@ -56,6 +56,14 @@ Define typed request/response contracts containing query, requested file count, 
 
 Support request cancellation so stale UI searches do not consume unbounded embedding/query work or replace newer results.
 
+## Testing requirements
+
+Add table-driven unit tests for query preservation/validation, RRF math, tied ranks, empty candidate lists, configurable constants, filename/path/symbol boosts, score ordering, file grouping, excerpt diversity, result limits, filters, and cancellation. Include adversarial cases where one file owns many mediocre chunks, exact identifiers conflict with semantic rank, duplicate candidates arrive from several sources, and raw score scales differ.
+
+Use a deterministic embedding provider and a temporary fixture LanceDB index for integration tests covering semantic-only, BM25-only, exact filename/path, quoted error, mixed, and no-result queries. Assert top-X means distinct files and every returned excerpt maps to correct source metadata. Keep relevance-quality benchmarking on the real corpus in Plan 11, while functional ranking correctness belongs here.
+
+Target approximately 93% line and function coverage for non-trivial query, candidate, fusion, boost, grouping, excerpt, timing, and cancellation logic, with strong branch coverage for ranking edge cases. Run coverage, typecheck, lint, and existing checks before handoff.
+
 ## Acceptance criteria
 
 - Search returns at most the requested number of distinct files.
@@ -65,8 +73,8 @@ Support request cancellation so stale UI searches do not consume unbounded embed
 - Every excerpt maps to the correct file and line range.
 - Fusion parameters are explicit and can be exercised by the final benchmark.
 - Warm searches do not trigger document re-indexing or remote requests.
+- Search and ranking tests meet the approximately 93% meaningful coverage target for non-trivial code.
 
 ## Handoff
 
 Plan 07 exposes the search service, file access, progress state, and lifecycle through a secure loopback-only Bun API.
-

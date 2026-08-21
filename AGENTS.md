@@ -120,6 +120,20 @@ Search returns distinct files, not merely top chunks. Retrieve a broader candida
 
 Keep the embedding model warm, batch document embeddings, use bounded concurrency, cache only where correctness is clear, and avoid unnecessary re-indexing. Start with exact/brute-force vector search if the corpus is below the scale at which an ANN index helps; make that decision from measured chunk count and latency.
 
+## Testing and coverage policy
+
+Testing belongs in every implementation phase beginning with Plan 02; do not defer subsystem tests until Plan 11. Each plan must add or update tests for the behavior it introduces and must leave the repository's existing checks passing.
+
+- Target approximately 93% line and function coverage for non-trivial, testable application code, with meaningful branch coverage for decision-heavy logic.
+- Treat 93% as a quality target, not an invitation to pad coverage with assertions that do not verify behavior. Critical configuration, path-security, indexing, ranking, and content-sanitization branches should be covered even when aggregate coverage is already above the target.
+- Exclude only genuinely trivial or non-testable material such as generated code, type-only declarations, static styling/assets, and minimal process/bootstrap glue. Every coverage exclusion must be narrow, justified, and visible in configuration or documentation.
+- Prefer deterministic unit tests for pure logic, integration tests at database/filesystem/process boundaries, and focused browser tests for user interactions. Do not mock away the boundary that a test is meant to validate.
+- Use temporary directories and fixture repositories. Tests must not read, index, modify, or depend on a developer's personal repositories unless running the explicit opt-in benchmark in Plan 11.
+- Tests must not require network access. Exercise the real ONNX model only in a dedicated local-assets integration/smoke suite; use a deterministic fake embedder for most indexing and ranking tests.
+- Every bug fix must include a regression test when the failure is non-trivial and reproducible.
+- At the end of each plan, run the relevant Bun tests with coverage plus the existing typecheck, lint, and build checks. Record any intentional gap or deferred cross-system scenario in that plan's completion notes.
+- Plan 11 remains responsible for closing suite-wide gaps, end-to-end release validation, relevance evaluation, security regression review, and large-corpus benchmarking; it is not the first point at which features receive tests.
+
 ## Plan execution rules
 
 1. Read this file and the active numbered plan completely before implementation.
@@ -131,7 +145,7 @@ Keep the embedding model warm, batch document embeddings, use bounded concurrenc
 7. Do not add cloud services, telemetry, API keys, ChromaDB, or a second runtime.
 8. Do not hardcode one developer's absolute paths or machine characteristics.
 9. Record important implementation decisions in the relevant plan or project documentation so later agents inherit them.
-10. Comprehensive testing, relevance evaluation, and large-corpus benchmarking are intentionally consolidated in the final numbered plan. Earlier phases should still run available typechecks and focused smoke checks needed to avoid handing broken contracts forward.
+10. Implement phase-specific tests alongside every plan from Plan 02 onward and maintain approximately 93% coverage of non-trivial, testable code. Plan 11 completes cross-system validation, relevance evaluation, and large-corpus benchmarking.
 
 ## Ordered implementation plans
 
@@ -146,4 +160,3 @@ Keep the embedding model warm, batch document embeddings, use bounded concurrenc
 9. `plans/09-file-viewer-renderers-and-grep.md`
 10. `plans/10-local-distribution-operations-and-polish.md`
 11. `plans/11-testing-relevance-evaluation-and-benchmarking.md`
-

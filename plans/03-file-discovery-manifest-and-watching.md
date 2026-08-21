@@ -66,6 +66,14 @@ Define typed contracts similar to:
 
 The downstream pipeline must be able to request a full snapshot and subscribe to normalized changes.
 
+## Testing requirements
+
+Build temporary fixture trees covering supported, extensionless UTF-8, unsupported, unreadable, hidden, ignored, empty, and large streamed files. Test deterministic ordering and IDs, metadata-first comparisons, content changes with unchanged size, timestamp precision edge cases, additions, deletions, renames, atomic editor saves, duplicate watcher events, reconciliation after simulated event loss, and recovery from a partially written manifest.
+
+Include real filesystem integration tests for in-root symlinks, out-of-root symlinks, cycles, canonicalization races that can be reproduced safely, and assurance that discovery never writes into the source root. Use controllable clocks/event adapters where timing is involved so the suite is not flaky.
+
+Target approximately 93% line and function coverage for non-trivial scanner, fingerprint, manifest, ignore, coalescing, and reconciliation code, with strong branch coverage for path-safety and error recovery. Run these tests with coverage plus typecheck, lint, and all pre-existing checks.
+
 ## Acceptance criteria
 
 - A repeated scan of an unchanged repository emits no content changes.
@@ -74,8 +82,8 @@ The downstream pipeline must be able to request a full snapshot and subscribe to
 - One unreadable file does not terminate the scan.
 - Watcher recovery includes a reconciliation path.
 - Discovery does not modify the indexed repository.
+- Discovery tests are deterministic and the phase remains at or near 93% coverage for non-trivial, testable code.
 
 ## Handoff
 
 Plan 04 consumes `DiscoveredFile` records and turns supported file content into normalized, line-addressable chunks.
-

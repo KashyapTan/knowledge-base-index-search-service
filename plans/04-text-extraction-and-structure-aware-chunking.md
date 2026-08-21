@@ -65,6 +65,14 @@ Each chunk must include:
 
 Line ranges must be accurate enough to open and highlight the corresponding section in the full-file viewer.
 
+## Testing requirements
+
+Create reviewed golden fixtures for every supported extractor family: Markdown/MDX, HTML, Python, JavaScript/TypeScript/JSX/TSX, structured data, shell/SQL/styles, and plain-text fallback. Assert extracted visible text, omitted noise, heading/symbol context, deterministic IDs, token limits, overlap policy, Unicode/line-ending normalization, and exact source line/offset mapping.
+
+Include malformed syntax, frontmatter, nested headings, fenced code, HTML scripts/styles/templates, large declarations, extremely long lines, invalid Unicode, empty files, and parser-fallback cases. Prefer semantic assertions over enormous brittle snapshots; use focused snapshots only where a structured output is meant to be stable. Add property/invariant tests where useful, such as no chunk exceeding the model limit and every chunk range remaining inside its file.
+
+Target approximately 93% line and function coverage for non-trivial extractor, normalizer, tokenizer/chunker, enrichment, and mapping logic. Critical fallback and malformed-input branches must be covered regardless of the aggregate number. Run coverage, typecheck, lint, and existing checks before handoff.
+
 ## Acceptance criteria
 
 - Identical input and configuration produce identical chunks and IDs.
@@ -74,8 +82,8 @@ Line ranges must be accurate enough to open and highlight the corresponding sect
 - No chunk exceeds the model's actual token limit after enrichment.
 - Every displayed chunk can map back to correct source lines.
 - Extractor failures are isolated to individual files and are actionable.
+- Extractor/chunker tests meet the project's approximately 93% meaningful coverage target for non-trivial code.
 
 ## Handoff
 
 Plan 05 consumes the chunk contracts, produces local embeddings, and persists file/chunk state in LanceDB.
-
