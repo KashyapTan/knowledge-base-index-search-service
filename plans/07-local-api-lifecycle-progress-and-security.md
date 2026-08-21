@@ -84,3 +84,43 @@ Target approximately 93% line and function coverage for non-trivial routing, val
 ## Handoff
 
 Plan 08 builds the primary React search experience against these stable API contracts.
+
+## Completion notes (2026-08-21)
+
+- Replaced the foundation server with one versioned `/api/v1` Bun API for health/version, startup
+  status, replayable SSE progress, cancellable search, opaque-ID file metadata/content, and
+  CSRF-protected reconciliation/reindex actions. Production Vite assets share the origin, while
+  unknown API paths remain structured JSON errors instead of falling through to the SPA.
+  The minimal React lifecycle page now renders loading, indexing counts, isolated issues, fatal
+  startup errors, and SSE reconnection state while Plan 08 remains responsible for search UI.
+- Added an explicit application runtime that starts HTTP before model/index initialization, composes
+  the existing discovery/extraction/indexing/search services, shares one offline embedding provider,
+  serializes initial/watcher/manual index work, and keeps display-safe startup failures observable.
+  The discovery watcher gained a narrow `scanInitially: false` option so this runtime can index one
+  authoritative initial scan without immediately repeating it.
+- Added compatible-instance discovery across the full configured 20-port fallback range. Matching
+  service version plus opaque root identity reuses the running URL rather than opening a competing
+  writer. The CLI opens the browser exactly once per launch after HTTP is useful; desktop/signal
+  glue is isolated in `src/server/cli.ts`.
+- Added bounded 32 KiB JSON parsing, strict body shapes/methods/content types, Plan 6 value validation,
+  four-search concurrency control, request/shutdown cancellation, structured HTTP error mapping,
+  and no default query/content/excerpt logging.
+- Added a bounded SSE replay hub with monotonic IDs, 128 retained events, safe `Last-Event-ID`
+  handling, full snapshots for absent/stale cursors, ordered startup/discovery/indexing/issue data,
+  and comment heartbeats that do not change event order.
+- Added opaque-ID file access with trusted manifest lookup, root-identity and lexical checks, live
+  canonicalization, file-handle open plus post-open canonical recheck, regular-file/64 MiB bounds,
+  64 KiB streaming, cancellation cleanup, and forced `text/plain`/`nosniff` responses. Traversal,
+  forged IDs, null bytes, out-of-root symlinks, symlink swaps, deletion races, directories, and
+  oversized files all fail safely.
+- Enforced exact localhost Host/selected-port checks, same-origin `Origin`/Fetch Metadata checks, no
+  permissive CORS, a same-origin CSRF token for state changes, and default-deny CSP plus restrictive
+  browser headers. Unexpected exceptions return generic errors without stacks or arbitrary paths.
+- Added 31 focused Plan 7 tests using real ephemeral Bun servers and real temporary filesystem
+  canonicalization. The complete default suite passes with 275 tests and one opt-in local-model
+  smoke test skipped, reporting 99.50% line and 98.93% function coverage overall. Routing,
+  validation, SSE, file access, and security report 100% line/function coverage; lifecycle reports
+  97.32% line and 92.11% function coverage, with only the real tokenizer asset-loader function left
+  to the existing opt-in local-model path. Lint, strict typecheck, and the production Vite build pass.
+- The stable routes, event format, security/file boundary, lifecycle ownership, and Plan 08/09
+  guidance are recorded in `docs/plan-07-local-api-lifecycle-security.md`.
