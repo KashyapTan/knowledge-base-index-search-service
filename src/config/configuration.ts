@@ -30,6 +30,7 @@ interface RawConfig {
   readonly cacheDir?: string;
   readonly modelId?: string;
   readonly normalization?: string;
+  readonly offline?: string | boolean;
   readonly port?: string | number;
   readonly quantization?: string;
   readonly root?: string;
@@ -55,6 +56,7 @@ const cliOptions = {
   "--config": "configFile",
   "--model": "modelId",
   "--normalization": "normalization",
+  "--offline": "offline",
   "--port": "port",
   "--quantization": "quantization",
   "--root": "root",
@@ -73,6 +75,10 @@ export function parseCliOptions(argv: readonly string[]): Result<CliConfig, Conf
   for (let index = 0; index < argv.length; index += 1) {
     const argument = argv[index];
     if (!argument) continue;
+    if (argument === "--offline") {
+      parsed.offline = "true";
+      continue;
+    }
     const equalsAt = argument.indexOf("=");
     const option = equalsAt === -1 ? argument : argument.slice(0, equalsAt);
     if (!isCliOption(option)) {
@@ -102,6 +108,7 @@ function environmentConfig(env: Readonly<Record<string, string | undefined>>): C
     ...(env.KBISS_CONFIG_FILE ? { configFile: env.KBISS_CONFIG_FILE } : {}),
     ...(env.KBISS_MODEL_ID ? { modelId: env.KBISS_MODEL_ID } : {}),
     ...(env.KBISS_NORMALIZATION ? { normalization: env.KBISS_NORMALIZATION } : {}),
+    ...(env.KBISS_OFFLINE ? { offline: env.KBISS_OFFLINE } : {}),
     ...(env.KBISS_PORT ? { port: env.KBISS_PORT } : {}),
     ...(env.KBISS_QUANTIZATION ? { quantization: env.KBISS_QUANTIZATION } : {}),
     ...(env.KBISS_ROOT ? { root: env.KBISS_ROOT } : {}),
@@ -114,6 +121,7 @@ const allowedConfigKeys = new Set<keyof RawConfig>([
   "cacheDir",
   "modelId",
   "normalization",
+  "offline",
   "port",
   "quantization",
   "root",
@@ -143,7 +151,9 @@ function parseConfigFileValue(value: unknown): Result<RawConfig, ConfigurationEr
     const validType =
       key === "port" || key === "vectorDimension"
         ? typeof setting === "number" || typeof setting === "string"
-        : typeof setting === "string";
+        : key === "offline"
+          ? typeof setting === "boolean" || typeof setting === "string"
+          : typeof setting === "string";
     if (!validType) {
       return err({
         code: "CONFIG_FILE_INVALID",
@@ -211,6 +221,21 @@ function nonEmpty(value: string, setting: string): Result<string, ConfigurationE
   return ok(trimmed);
 }
 
+function parseBoolean(
+  value: string | boolean,
+  setting: string,
+): Result<boolean, ConfigurationError> {
+  if (typeof value === "boolean") return ok(value);
+  const normalized = value.trim().toLowerCase();
+  if (["1", "true", "yes", "on"].includes(normalized)) return ok(true);
+  if (["0", "false", "no", "off"].includes(normalized)) return ok(false);
+  return err({
+    code: "CONFIG_VALUE_INVALID",
+    message: `${setting} must be true or false.`,
+    details: { setting },
+  });
+}
+
 function compatibilityNamespaceInput(compatibility: IndexCompatibility): string {
   return JSON.stringify({
     chunking: compatibility.chunking,
@@ -270,6 +295,7 @@ export async function loadAppConfig(
       environment.normalization ??
       file.value.normalization ??
       DEFAULT_EMBEDDING_CONFIG.normalization,
+    offline: cli.value.offline ?? environment.offline ?? file.value.offline ?? false,
     port: cli.value.port ?? environment.port ?? file.value.port ?? DEFAULT_PORT,
     quantization:
       cli.value.quantization ??
@@ -314,6 +340,8 @@ export async function loadAppConfig(
       details: { setting: "normalization" },
     });
   }
+  const offline = parseBoolean(merged.offline, "offline");
+  if (!offline.ok) return offline;
 
   const sourceRoot = await canonicalizeSourceRoot(merged.root, { cwd, homeDir });
   if (!sourceRoot.ok) return sourceRoot;
@@ -348,6 +376,7 @@ export async function loadAppConfig(
     compatibility,
     embedding,
     index: DEFAULT_INDEX_CONFIG,
+    offline: offline.value,
     paths: paths.value,
     server: { hostname: LOOPBACK_HOST, port: port.value },
     sourceRoots: [{ identity: rootIdentity, path: sourceRoot.value }],

@@ -12,6 +12,15 @@
     "build": "\"$npm_execpath\" run build:ui && \"$npm_execpath\" run typecheck",
     "build:ui": "vite build",
     "serve": "\"$npm_execpath\" run build:ui && \"$npm_execpath\" run src/server/cli.ts",
+    "config": "\"$npm_execpath\" run scripts/operations.ts config",
+    "doctor": "\"$npm_execpath\" run scripts/operations.ts doctor",
+    "reconcile": "\"$npm_execpath\" run scripts/operations.ts reconcile",
+    "reindex": "\"$npm_execpath\" run scripts/operations.ts reindex",
+    "rebuild": "\"$npm_execpath\" run scripts/operations.ts rebuild",
+    "reset": "\"$npm_execpath\" run scripts/operations.ts reset",
+    "root": "\"$npm_execpath\" run scripts/operations.ts root",
+    "version": "\"$npm_execpath\" run scripts/operations.ts version",
+    "help": "\"$npm_execpath\" run scripts/operations.ts help",
     "typecheck": "tsc --noEmit",
     "lint": "biome check .",
     "model:setup": "\"$npm_execpath\" run scripts/setup-model.ts",
@@ -20,6 +29,7 @@
     "test:ui": "\"$npm_execpath\" test src/ui",
     "test:e2e": "playwright test",
     "test:coverage": "\"$npm_execpath\" test --coverage --coverage-reporter=text",
+    "smoke:operations": "\"$npm_execpath\" run scripts/operations-smoke.ts",
     "compat": "\"$npm_execpath\" run build:ui && \"$npm_execpath\" run scripts/compatibility-check.ts"
   },
   "dependencies": {

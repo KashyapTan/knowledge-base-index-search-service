@@ -19,6 +19,8 @@ export type {
   IndexStore,
   IndexStoreError,
   IndexStoreErrorCode,
+  ModelSetupPhase,
+  ModelWarmUpOptions,
 } from "./contracts.ts";
 export {
   BGE_MODEL_PROFILES,
@@ -26,6 +28,7 @@ export {
   type EmbeddingWorkerBoundary,
   TransformersEmbeddingProvider,
 } from "./embedding-provider.ts";
+export { EmbeddingWorkerError } from "./embedding-worker-client.ts";
 export {
   FakeEmbeddingProvider,
   type FakeEmbeddingProviderOptions,
@@ -39,4 +42,10 @@ export {
   type OpenLanceIndexOptions,
   openLanceIndex,
 } from "./lance-store.ts";
+export {
+  inspectModelAssets,
+  type ModelAssetInspection,
+  quarantineModelCache,
+  verifyOrWriteModelAssetManifest,
+} from "./model-assets.ts";
 export { createIndexingService, RepositoryIndexingService } from "./service.ts";

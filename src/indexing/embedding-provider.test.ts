@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { mkdir, mkdtemp, rm, symlink, utimes, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, rm, symlink, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { EmbeddingWorkerConfig } from "./embedding-protocol.ts";
@@ -10,7 +10,11 @@ import {
 } from "./embedding-provider.ts";
 import { EmbeddingWorkerClient, EmbeddingWorkerError } from "./embedding-worker-client.ts";
 import { FakeEmbeddingProvider } from "./fake-embedding-provider.ts";
-import { verifyOrWriteModelAssetManifest } from "./model-assets.ts";
+import {
+  inspectModelAssets,
+  quarantineModelCache,
+  verifyOrWriteModelAssetManifest,
+} from "./model-assets.ts";
 import { indexingConfig } from "./test-helpers.ts";
 
 let fixture = "";
@@ -31,6 +35,14 @@ const embedding = {
 };
 
 describe("model asset integrity", () => {
+  const identity = {
+    modelId: embedding.modelId,
+    quantization: embedding.quantization,
+    vectorDimension: embedding.vectorDimension,
+    maximumTokens: 512,
+    normalization: embedding.normalization,
+  };
+
   test("records checksums and rejects changed cached assets", async () => {
     const cache = join(fixture, "models");
     await mkdir(join(cache, "model"), { recursive: true });
@@ -94,6 +106,59 @@ describe("model asset integrity", () => {
     expect(verified.ok).toBe(false);
     if (!verified.ok) expect(verified.error.code).toBe("MODEL_ASSETS_INVALID");
   });
+
+  test("inspects missing, unreadable, mismatched, and incomplete asset caches", async () => {
+    const missing = join(fixture, "missing-models");
+    expect(await inspectModelAssets(missing, identity)).toMatchObject({ state: "missing" });
+    expect(await verifyOrWriteModelAssetManifest(missing, identity, "verify")).toEqual({
+      ok: true,
+      value: undefined,
+    });
+    expect((await verifyOrWriteModelAssetManifest(missing, identity, "write-if-missing")).ok).toBe(
+      false,
+    );
+
+    const unreadableManifest = join(fixture, "unreadable-manifest");
+    await mkdir(join(unreadableManifest, "kbiss-model-assets.json"), { recursive: true });
+    expect(await inspectModelAssets(unreadableManifest, identity)).toMatchObject({
+      state: "corrupt",
+    });
+
+    const mismatch = join(fixture, "mismatch-models");
+    await mkdir(mismatch);
+    await writeFile(join(mismatch, "weights.bin"), "weights");
+    expect((await verifyOrWriteModelAssetManifest(mismatch, identity, "write-if-missing")).ok).toBe(
+      true,
+    );
+    expect(
+      await inspectModelAssets(mismatch, { ...identity, modelId: "kbiss/different-model" }),
+    ).toMatchObject({ state: "corrupt" });
+    await rm(join(mismatch, "weights.bin"));
+    expect(await inspectModelAssets(mismatch, identity)).toMatchObject({ state: "corrupt" });
+  });
+
+  test("quarantines present caches, initializes missing caches, and reports unsafe failures", async () => {
+    const missing = join(fixture, "new-cache");
+    expect(await quarantineModelCache(missing)).toEqual({ ok: true, value: undefined });
+    const present = join(fixture, "present-cache");
+    await mkdir(present);
+    await writeFile(join(present, "asset"), "asset");
+    const quarantined = await quarantineModelCache(present);
+    expect(quarantined.ok).toBe(true);
+    if (quarantined.ok)
+      expect(await Bun.file(join(quarantined.value as string, "asset")).exists()).toBe(true);
+
+    const blockedParent = join(fixture, "blocked-parent");
+    await writeFile(blockedParent, "file");
+    expect((await quarantineModelCache(join(blockedParent, "cache"))).ok).toBe(false);
+
+    const symlinkCache = join(fixture, "write-symlink-cache");
+    await mkdir(symlinkCache);
+    await symlink(join(fixture, "outside.bin"), join(symlinkCache, "linked.bin"));
+    expect(
+      (await verifyOrWriteModelAssetManifest(symlinkCache, identity, "write-if-missing")).ok,
+    ).toBe(false);
+  });
 });
 
 class RecordingWorker implements EmbeddingWorkerBoundary {
@@ -131,6 +196,29 @@ class RecordingWorker implements EmbeddingWorkerBoundary {
 }
 
 describe("Transformers provider orchestration", () => {
+  test("preserves a corrupt cache and retries pinned acquisition with progress", async () => {
+    const cache = join(fixture, "recover-models");
+    await mkdir(cache, { recursive: true });
+    await writeFile(join(cache, "kbiss-model-assets.json"), "{");
+    const worker = new RecordingWorker(cache, true);
+    const provider = new TransformersEmbeddingProvider(embedding, cache, { worker });
+    const phases: string[] = [];
+    expect(
+      await provider.warmUp({
+        allowDownload: true,
+        recoverCorruptAssets: true,
+        downloadRetries: 3,
+        onProgress: (phase) => phases.push(phase),
+      }),
+    ).toEqual({ ok: true, value: undefined });
+    expect(phases).toEqual(["verifying", "recovering", "loading-local", "downloading", "ready"]);
+    expect(
+      (await readdir(fixture)).some((name) => name.startsWith("recover-models.corrupt-")),
+    ).toBe(true);
+    expect(worker.configs.map((entry) => entry.localFilesOnly)).toEqual([true, false]);
+    await provider.shutdown();
+  });
+
   test("requires explicit setup before allowing a pinned remote download", async () => {
     const cache = join(fixture, "models");
     const missingWorker = new RecordingWorker(cache, true);

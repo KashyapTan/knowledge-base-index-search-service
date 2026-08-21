@@ -13,10 +13,15 @@ identity. This includes instances that previously selected a fallback port, prev
 writers over one root/index namespace.
 
 The returned started application owns a `ready` promise and idempotent `shutdown()`. The lifecycle
-uses one shared offline embedding provider for document and query work, one Lance index store, one
+uses one shared local-first embedding provider for document and query work, one Lance index store, one
 search retriever, the discovery service, and serialized indexing. Startup follows
 `loading_model -> scanning -> indexing -> ready`; display-safe failures remain observable through
 the status API while the UI server stays available.
+
+The shared provider is local-first. Plan 10 permits a missing pinned model to be acquired during an
+online first launch, while explicit offline configuration keeps the original no-network startup
+boundary. In both cases inference begins only after local integrity preparation and the worker has
+disabled remote loading.
 
 The initial scan is explicit and indexed before the watcher starts without a duplicate initial
 scan. Later manifest changes and manual work are serialized through one indexing tail. Shutdown

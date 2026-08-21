@@ -45,6 +45,14 @@ describe("command-line parsing", () => {
     });
   });
 
+  test("accepts the offline flag and explicit offline values", () => {
+    expect(parseCliOptions(["--offline"])).toEqual({ ok: true, value: { offline: "true" } });
+    expect(parseCliOptions(["--offline=false"])).toEqual({
+      ok: true,
+      value: { offline: "false" },
+    });
+  });
+
   test.each([
     [["--unknown", "value"], "Unknown command-line option"],
     [["--root"], "requires a value"],
@@ -58,6 +66,41 @@ describe("command-line parsing", () => {
 });
 
 describe("configuration precedence and validation", () => {
+  test("resolves offline policy from CLI, environment, and configuration", async () => {
+    const root = await makeRoot("offline-root");
+    const locations = externalPaths("offline");
+    const configFile = join(fixtureDir, "offline.json");
+    await writeFile(configFile, JSON.stringify({ offline: true }));
+    const fromFile = await loadAppConfig({
+      argv: ["--config", configFile, "--root", root],
+      env: { KBISS_STATE_DIR: locations.stateDir, KBISS_CACHE_DIR: locations.cacheDir },
+      homeDir: fixtureDir,
+      projectDir,
+    });
+    expect(fromFile.ok && fromFile.value.offline).toBe(true);
+    const fromCli = await loadAppConfig({
+      argv: ["--config", configFile, "--root", root, "--offline=false"],
+      env: {
+        KBISS_OFFLINE: "true",
+        KBISS_STATE_DIR: locations.stateDir,
+        KBISS_CACHE_DIR: locations.cacheDir,
+      },
+      homeDir: fixtureDir,
+      projectDir,
+    });
+    expect(fromCli.ok && fromCli.value.offline).toBe(false);
+    const invalid = await loadAppConfig({
+      argv: ["--root", root],
+      env: {
+        KBISS_OFFLINE: "sometimes",
+        KBISS_STATE_DIR: locations.stateDir,
+        KBISS_CACHE_DIR: locations.cacheDir,
+      },
+      homeDir: fixtureDir,
+      projectDir,
+    });
+    expect(invalid).toMatchObject({ ok: false, error: { code: "CONFIG_VALUE_INVALID" } });
+  });
   test("applies CLI, environment, user file, then defaults without mutating inputs", async () => {
     const [fileRoot, environmentRoot, cliRoot] = await Promise.all([
       makeRoot("file-root"),

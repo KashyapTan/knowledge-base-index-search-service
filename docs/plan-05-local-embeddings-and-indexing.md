@@ -28,11 +28,14 @@ profile (`Xenova/bge-base-en-v1.5`, 768 dimensions), so Plan 11 can select it th
 without model-specific indexer branches. BGE v1.5 inputs currently use no query instruction; Plan 11
 owns the corpus-specific decision to introduce one.
 
-`bun run model:setup` is the only ordinary path that opts into remote model access. The provider
-first attempts a local-only load. When setup is explicitly authorized and assets are absent, it
-allows Transformers.js to fetch the configured Hugging Face model into
-`ResolvedPaths.modelCacheDir`, then disables remote loading before inference. Normal `warmUp()` never
-opts into a download and returns `MODEL_ASSETS_MISSING` with a setup instruction.
+Plan 10 operationalized this contract: `bun run model:setup` remains the explicit preparation path,
+and an online first `bun run serve` now also authorizes acquisition so the documented two-command
+teammate flow is complete. Both paths first attempt a local-only load. When acquisition is authorized
+and assets are absent, Transformers.js fetches only the configured Hugging Face model into
+`ResolvedPaths.modelCacheDir`, then disables remote loading before inference. `--offline`,
+`KBISS_OFFLINE`, or config `offline:true` never opts into a download and returns an actionable
+`MODEL_ASSETS_MISSING`/`MODEL_ASSETS_INVALID` result. See the Plan 10 operations contract for retry,
+corrupt-cache quarantine, and verified air-gapped import behavior.
 
 After the first successful load, KBISS writes `kbiss-model-assets.json` in the model cache. It records
 the selected model/quantization plus size, modification time, and SHA-256 for every regular cached

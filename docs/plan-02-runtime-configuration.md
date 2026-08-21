@@ -23,6 +23,7 @@ The sources map as follows:
 | Quantization | `--quantization` | `KBISS_QUANTIZATION` | `quantization` | `q8` |
 | Vector dimensions | `--vector-dimension` | `KBISS_VECTOR_DIMENSION` | `vectorDimension` | `384` |
 | Normalization | `--normalization` | `KBISS_NORMALIZATION` | `normalization` | `l2` |
+| Offline model policy | `--offline[=true|false]` | `KBISS_OFFLINE` | `offline` | `false` |
 | State directory | `--state-dir` | `KBISS_STATE_DIR` | `stateDir` | OS-specific |
 | Cache directory | `--cache-dir` | `KBISS_CACHE_DIR` | `cacheDir` | OS-specific |
 | Config file | `--config` | `KBISS_CONFIG_FILE` | n/a | OS-specific |

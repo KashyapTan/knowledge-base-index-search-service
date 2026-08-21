@@ -26,11 +26,27 @@ if (!launch.ok) {
 } else {
   const started = launch.value;
   console.info(`KBISS listening at ${started.url}`);
+  console.info(`Source root: ${started.config.sourceRoots[0].path}`);
+  console.info(
+    started.config.offline
+      ? "Offline mode is enabled; only verified cached model assets will be used."
+      : "Model assets will be verified locally and acquired once if they are missing.",
+  );
+  void started.ready.then(() => {
+    const startup = started.runtime.status().startup;
+    if (startup.phase === "error") {
+      console.error(`[${startup.error.code}] ${startup.error.message}`);
+      console.error("Run `bun run doctor` for resolved paths and recovery guidance.");
+    } else {
+      console.info("KBISS is ready. Press Ctrl-C to stop it safely.");
+    }
+  });
   let stopping = false;
   const stop = (): void => {
     if (stopping) return;
     stopping = true;
-    void started.shutdown();
+    console.info("Stopping KBISS and checkpointing local work...");
+    void started.shutdown().then(() => console.info("KBISS stopped."));
   };
   process.once("SIGINT", stop);
   process.once("SIGTERM", stop);

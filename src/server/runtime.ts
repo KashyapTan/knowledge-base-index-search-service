@@ -100,7 +100,11 @@ export async function createProductionServices(
     if (signal.aborted) {
       return serviceFailure({ code: "STARTUP_CANCELLED", message: "Startup was cancelled." });
     }
-    const warm = await embeddings.warmUp();
+    const warm = await embeddings.warmUp({
+      allowDownload: !config.offline,
+      downloadRetries: 2,
+      recoverCorruptAssets: !config.offline,
+    });
     if (!warm.ok) return serviceFailure(warm.error);
     const tokenizer = await adapters.loadTokenCounter(config);
     if (signal.aborted) {

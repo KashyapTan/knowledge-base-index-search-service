@@ -80,3 +80,39 @@ Target approximately 93% line and function coverage for non-trivial setup, opera
 ## Handoff
 
 Plan 11 is the final phase. It validates correctness, security, relevance, and performance against fixtures and the user-designated large external repository, then makes the evidence-based small-versus-base embedding decision.
+
+## Completion notes (2026-08-21)
+
+- Made `bun install` plus `bun run serve` the complete online teammate flow. Launch still exposes the
+  loading UI before long initialization and opens the browser once, but now performs local-first
+  model verification, two-attempt pinned acquisition when assets are absent, corruption quarantine,
+  reconciliation, watching, and actionable graceful-start/stop console reporting. Added explicit
+  `--offline`/`KBISS_OFFLINE`/user-config policy with tested precedence.
+- Added deterministic model setup states and progress, retry bounds, integrity inspection, preserved
+  `.corrupt-*` caches, and verified air-gapped imports. Imports require a complete checksum manifest,
+  reject symlinks and overlapping paths, stage through a sibling directory, and preserve the prior
+  managed cache. A controlled clean-environment smoke proves first preparation, portable import, and
+  a fully offline restart without network or developer repositories.
+- Added teammate operations for resolved config/paths, dependency/platform diagnostics, version,
+  running-process reconcile/reindex, atomic default-root selection, preserved index rebuild, and
+  exact-scope reset. Reset/rebuild print targets, prompt interactively, require `--yes` in automation,
+  reject broad/equal/unresolved/symlink-escaped targets, and leave unrelated fixture sentinels intact.
+  Rebuild moves the old namespace to external backups before creating the fresh resumable target.
+- Completed production asset behavior with Bun-derived content types, immutable caching only for
+  hashed Vite assets, revalidation for ordinary local assets, no-cache HTML/SPA fallback, and
+  unchanged `no-store` API behavior. Added a local SVG icon, descriptive title/metadata, theme colors,
+  and coherent startup/diagnostic copy while preserving Plan 8/9 accessibility and security contracts.
+- Rewrote the README around privacy, the two-command flow, offline/air-gapped setup, root overrides,
+  OS-specific storage, supported formats and diagram fallbacks, safe operations, native-platform
+  limitations, and troubleshooting. Recorded the Plan 10 contract and updated superseded Plan 2/5/7
+  configuration/model-lifecycle notes. CI now runs the controlled operations smoke and production
+  build after a frozen install.
+- Added process, filesystem, HTTP, configuration, lifecycle, setup, corruption, interrupted rebuild,
+  busy-instance, asset-cache, and safety regression coverage. The complete default suite passes 330
+  tests with one existing opt-in local-assets test skipped and reports 99.45% line / 98.71% function
+  coverage overall. Plan 10 CLI is 99.47% line / 100% function, operations core is 97.01% / 94.44%,
+  and model-asset logic is 100% / 95%.
+- Frozen install, strict typecheck, Biome lint, production Vite build, controlled setup/offline smoke,
+  Playwright's real API/UI path, and the disposable native compatibility check all pass. The latter
+  revalidated LanceDB, loopback production assets, Bun Workers, and q8 BGE-small 384-dimensional
+  normalized embeddings on Bun 1.4.0/macOS arm64 without leaving model or database data behind.

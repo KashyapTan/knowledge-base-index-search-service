@@ -1,103 +1,202 @@
-# Knowledge Base Index Search Service
+# KBISS
 
-KBISS is a local-only search application for the `card-gateway-artifacts` repository. The current
-implementation includes the Bun/React foundation, validated runtime configuration, external
-per-user state layout, index compatibility checks, and a resumable file-discovery manifest with
-safe recursive watching. It also includes local-only, structure-aware text extraction and
-tokenizer-bounded chunking, local Worker-based BGE embeddings, and resumable LanceDB file/chunk
-indexing, hybrid BM25/vector/path retrieval, a secure loopback-only API with streamed startup and
-indexing progress, and an accessible React search interface for distinct-file results. The secure
-full-file renderers and in-viewer grep remain in Plan 09.
+KBISS (Knowledge Base Index Search Service) is a fast, private search app for a local
+`card-gateway-artifacts` repository. It combines exact filename/path and BM25 matches with local
+semantic search, groups results by file, and includes safe Markdown, HTML, code, text, diagram, and
+in-file grep views.
 
-## Requirements
+Repository content, queries, embeddings, and indexes stay on this machine. KBISS has no telemetry,
+API key, remote inference service, CDN, or remote font. On an online first run, only the pinned
+public embedding model is downloaded from Hugging Face; repository content is never sent with that
+request. Once verified, model loading and all search/index work are local.
 
-- Bun 1.4.0 (pinned in `.bun-version` and `package.json`)
-- A platform supported by the pinned native packages; Plan 1 is verified on macOS arm64
-- A local Playwright Chromium install for browser tests (`bunx playwright install chromium`)
-- Internet access for the first compatibility run, which downloads the public BGE model into a
-  temporary directory and removes it when the check ends
-- Internet access for the explicit first `model:setup`; indexing after setup remains offline
+## Prerequisites
 
-## Install and run
+- Bun **1.4.0**, pinned by `.bun-version`, `package.json`, and `bun.lock`.
+- macOS arm64 is the currently verified native target.
+- The pinned LanceDB/ONNX packages also publish binaries for macOS x64, Linux x64/arm64, and Windows
+  x64, but KBISS does not yet run those targets in CI. `bun run doctor` reports the support tier.
+- A readable local source repository. The default is `~/dev/card-gateway-artifacts`.
+
+KBISS uses ordinary `bun run`; it does not use `bun build --compile`. Transformers.js/ONNX and
+LanceDB include native libraries, and single-executable packaging is not a supported delivery path.
+
+## Install and start
 
 ```sh
-bun install --frozen-lockfile
-bun run compat
-bun run model:setup
+bun install
 bun run serve
 ```
 
-`bun run serve` validates the source root, prepares external per-user state, builds the UI, and
-starts the loopback server at `http://127.0.0.1:3210`, opens the browser as soon as the loading page
-is available, and initializes/reconciles the local index in the background. If that port is busy,
-KBISS searches the next loopback ports. A later launch detects a compatible instance anywhere in
-that range and opens it instead of starting a competing index writer.
+That is the normal teammate workflow. `serve` builds reproducible production UI assets, validates
+the source root, starts one `127.0.0.1` server, opens the browser once, prepares or verifies the
+pinned model, resumes or creates the compatible index, reconciles the repository, and watches for
+changes until interrupted. The page is available during model loading and indexing and becomes
+searchable as committed data is ready. Stop with Ctrl-C; KBISS checkpoints safe work and shuts down
+the watcher, worker, LanceDB, and HTTP server.
 
-The source repository defaults to `~/dev/card-gateway-artifacts`. Override it without modifying
-the project:
+The first online run may take several minutes while it downloads and verifies
+`Xenova/bge-small-en-v1.5` q8. Download failure is retried twice. Later launches verify the cache and
+load with remote access disabled. A corrupt cache is preserved beside the managed cache before a
+fresh copy is acquired.
+
+Override the root or preferred port for one launch:
 
 ```sh
 bun run serve --root /path/to/card-gateway-artifacts --port 3210
 ```
 
-`bun run model:setup` is the explicit, one-time network-enabled model preparation step. It downloads
-only the configured model into KBISS's external per-user cache and writes an integrity manifest.
-Normal indexing first verifies that manifest and starts Transformers.js with remote model loading
-disabled. Pass the same `--root`, `--model`, and embedding options used for `serve` when overriding
-defaults.
+If the preferred port is busy, KBISS searches the next 19 loopback ports. If a compatible KBISS for
+the same root is already running in that range, the command opens that instance rather than starting
+a competing index writer. KBISS never falls back to a network-facing interface.
 
-Configuration precedence is command-line options, `KBISS_*` environment variables, the per-user
-`config.json`, then defaults. See [Plan 2 runtime configuration](docs/plan-02-runtime-configuration.md)
-for every setting and the OS-specific state layout. KBISS never creates the source root and never
-writes indexes or model assets into either repository.
+Contributor mode is separate:
 
-## Scripts
+```sh
+bun run dev --root /path/to/fixture-repository
+```
+
+## Offline and air-gapped setup
+
+Force a launch to use verified local assets only:
+
+```sh
+bun run serve --offline
+```
+
+`KBISS_OFFLINE=true` and an `offline` boolean in the user config are equivalent. If assets are
+missing or corrupt, offline startup fails with an actionable message and leaves repository/index
+data unchanged.
+
+For an air-gapped machine, prepare the same pinned model on a connected, platform-compatible
+machine:
+
+```sh
+bun run model:setup --root /path/to/a-readable-root
+bun run config --root /path/to/a-readable-root
+```
+
+Copy the reported `modelCacheDir` as a whole, including `kbiss-model-assets.json`, then import it on
+the air-gapped machine:
+
+```sh
+bun run model:setup --offline --asset-source /mounted/kbiss-model-bundle \
+  --root /path/to/card-gateway-artifacts
+bun run serve --offline --root /path/to/card-gateway-artifacts
+```
+
+Imports accept only a checksum-verified KBISS bundle with no symlinks. Any previous managed model
+cache is preserved before the imported bundle replaces it. KBISS never falls back to remote
+inference.
+
+## Configuration and local storage
+
+Precedence is command-line options, `KBISS_*` environment variables, the per-user `config.json`,
+then defaults. Supported options are `--root`, `--port`, `--config`, `--state-dir`, `--cache-dir`,
+`--model`, `--quantization`, `--vector-dimension`, `--normalization`, and `--offline`.
+
+Save a new default root after validating it:
+
+```sh
+bun run root /path/to/card-gateway-artifacts
+```
+
+An explicit `KBISS_ROOT` or `--root` still takes precedence over the saved value. Print the complete
+resolved configuration and exact storage paths with:
+
+```sh
+bun run config
+```
+
+Default application locations are:
+
+| Platform | State/config | Model cache |
+| --- | --- | --- |
+| macOS | `~/Library/Application Support/kbiss` | `~/Library/Caches/kbiss` |
+| Linux | `$XDG_STATE_HOME/kbiss` and `$XDG_CONFIG_HOME/kbiss` | `$XDG_CACHE_HOME/kbiss` |
+| Windows | `%LOCALAPPDATA%\kbiss\state` and `%APPDATA%\kbiss` | `%LOCALAPPDATA%\kbiss\cache` |
+
+Indexes are namespaced by opaque hashes of the canonical source root and all index/model schema
+inputs. Model caches are namespaced by model identity. No database, model, manifest, log, or built
+frontend cache is written into the KBISS repository or indexed repository; `dist/` is ignored build
+output.
+
+## Operations
 
 | Command | Purpose |
 | --- | --- |
-| `bun run dev` | Build the UI once, then run the local API/server lifecycle with Bun hot reload. |
-| `bun run build` | Build the Vite asset and run strict TypeScript checks. |
-| `bun run serve` | Build and serve the production UI asset on loopback. |
-| `bun run typecheck` | Run strict TypeScript without emitting JavaScript. |
-| `bun run lint` | Check formatting and lint rules with Biome. |
-| `bun run model:setup` | Explicitly download/verify the configured model in the external local cache. |
-| `bun run format` | Apply the repository formatter. |
-| `bun test` | Run focused Bun tests. |
-| `bun run test:ui` | Run deterministic React component, hook, URL, and browser-adapter tests. |
-| `bun run test:e2e` | Build the UI and run the Playwright keyboard/API smoke path. |
-| `bun run test:coverage` | Run Bun tests with line and function coverage. |
-| `bun run compat` | Exercise LanceDB, BGE inference, Bun Workers, HTTP, and Vite together. |
+| `bun run config` | Print the resolved root, model/index settings, and exact state paths. |
+| `bun run doctor` | Check Bun/native target support, pinned dependencies, model integrity, and index compatibility. |
+| `bun run version` | Print KBISS, Bun, platform/architecture, and important dependency versions. |
+| `bun run reconcile` | Ask the running same-root app to scan for filesystem changes. |
+| `bun run reindex` | Ask the running same-root app to re-evaluate committed files. |
+| `bun run rebuild` | Preserve the selected current index, stage a fresh one, and print both exact paths. |
+| `bun run reset` | Remove only the selected current root/model/schema index. |
+| `bun run root <path>` | Validate and save a different default source root atomically. |
+| `bun run model:setup` | Download/import, verify, and warm the selected model explicitly. |
+| `bun run help` | Show command and option help. |
 
-## Module boundaries
+`reconcile` and `reindex` require `serve` to be running and use its same-origin action token. For a
+corrupt/incompatible current index, stop the app, run `bun run rebuild`, then `bun run serve`.
+Rebuild moves the previous index into the external `rebuild-backups` area before creating the fresh
+target, so an interrupted rebuild remains recoverable. A schema/model/chunker upgrade naturally
+selects a new namespace and leaves the old namespace usable until the new index is ready.
 
-```text
-src/
-  server/       secure Bun HTTP API, SSE progress, file access, and graceful lifecycle
-  config/       validated runtime configuration and local-state contracts
-  discovery/    deterministic scanning, manifest persistence, and reconciled watching
-  extraction/   safe format-aware extraction, source mapping, and tokenizer-bounded chunking
-  indexing/     offline embedding provider, bounded Worker queue, and resumable LanceDB pipeline
-  search/       hybrid retrieval and file-level aggregation
-  shared/       environment-independent contracts and result/error conventions
-  ui/           React/Vite browser application
+Reset/rebuild commands print their exact targets and prompt on an interactive terminal. Automation
+must opt in with `--yes`; lack of confirmation removes nothing. Additional reset scopes are explicit:
+
+```sh
+# Remove every index-schema version for only the selected root.
+bun run reset --all-index-versions
+
+# Also remove the selected model cache (it may be shared by other roots using that model).
+bun run reset --include-model
 ```
 
-The project uses tagged `Result<T, AppError>` values for expected failures at module boundaries.
-Thrown exceptions remain appropriate for programmer errors; the server maps expected and
-unexpected request failures to display-safe structured responses without exposing stacks or local
-absolute paths.
+Every target is checked against the configured application state/cache parent immediately before
+deletion. Broad paths, parent directories, unresolved paths, and symlink escapes are rejected.
+Unrelated files are never selected.
 
-See [Plan 1 compatibility notes](docs/plan-01-compatibility.md) for pinned native imports and the
-worker boundary, and [Plan 2 runtime configuration](docs/plan-02-runtime-configuration.md) for the
-configuration and persisted-state contracts. See
-[Plan 3 file discovery](docs/plan-03-file-discovery.md) for inventory, change, manifest, ignore, and
-watcher contracts consumed by extraction and indexing.
-See [Plan 4 text extraction](docs/plan-04-text-extraction.md) for extractor selection, normalized
-source mapping, chunk identity, token-limit, and Plan 5 persistence contracts.
-See [Plan 5 local indexing](docs/plan-05-local-embeddings-and-indexing.md) for offline model setup,
-LanceDB schemas, commit/recovery semantics, progress events, and Plan 6 retrieval contracts.
-See [Plan 6 hybrid search](docs/plan-06-hybrid-search.md) for ranking and response contracts, and
-[Plan 7 local API](docs/plan-07-local-api-lifecycle-security.md) for routes, SSE, lifecycle, file
-containment, and browser security contracts consumed by Plans 08-09.
-See [Plan 8 React search](docs/plan-08-react-search-experience.md) for browser request coordination,
-URL privacy behavior, result presentation, keyboard interaction, and the Plan 9 viewer-host handoff.
+## Supported content
+
+First-class indexing covers Markdown/MDX, HTML, Python, JavaScript/TypeScript and JSX/TSX, JSON,
+JSONC, YAML, TOML, XML, CSS and preprocessors, shell, SQL, CSV, text, and logs. Other files positively
+detected as ordinary UTF-8 text use a safe fallback. Images/OCR, office documents, archives,
+compiled binaries, and proprietary formats are not indexed.
+
+Markdown diagrams fenced as `mermaid` render locally after sanitization. PlantUML/PUMl,
+Graphviz/DOT, D2, Vega, and Vega-Lite fences remain labeled, copyable source; KBISS does not send
+them to a remote renderer. Repository HTML is sanitized and shown in an empty-sandbox iframe.
+
+## Troubleshooting
+
+- **Root missing/unreadable:** run `bun run root /correct/path` or pass `--root`; KBISS never creates
+  the source repository.
+- **Model missing offline:** connect once and run `bun run model:setup`, or import a verified local
+  bundle with `--asset-source`.
+- **Model corrupt:** online `serve`/`model:setup` preserves the corrupt cache and reacquires it;
+  offline mode asks for a verified bundle instead.
+- **Index rebuild required:** stop KBISS, run `bun run doctor`, then `bun run rebuild` with the same
+  root/configuration options and restart.
+- **Busy ports:** KBISS searches 20 loopback ports and reports `PORT_UNAVAILABLE` if all are occupied.
+- **Native load failure:** confirm `bun --version` is exactly 1.4.0 and inspect `bun run doctor`.
+- **Browser did not open:** use the `http://127.0.0.1:<port>` URL printed by `serve`; the server stays
+  usable when no desktop opener exists.
+
+## Development checks
+
+```sh
+bun run lint
+bun run typecheck
+bun run test:coverage
+bun run build
+bun run test:e2e
+```
+
+`bun run compat` is the explicit network-enabled native compatibility spike. Ordinary tests use
+temporary roots/application-data and deterministic fake embeddings; they do not read or mutate a
+developer repository. The real local-model smoke test remains opt-in for Plan 11.
+
+Detailed subsystem contracts are in [`docs/`](docs/). Plan 10 operational decisions and the Plan 11
+handoff are recorded in
+[`docs/plan-10-local-distribution-operations-and-polish.md`](docs/plan-10-local-distribution-operations-and-polish.md).
