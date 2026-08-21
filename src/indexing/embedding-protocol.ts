@@ -14,6 +14,8 @@ export interface EmbeddingWorkerConfig {
   readonly dtype: DataType;
   readonly expectedDimension: number;
   readonly cacheDir: string;
+  /** Setup may opt in to a pinned remote download; normal indexing always sets this true. */
+  readonly localFilesOnly: boolean;
 }
 
 export type EmbeddingWorkerRequest =
@@ -51,6 +53,10 @@ export type EmbeddingWorkerResponse =
   | {
       readonly kind: "error";
       readonly requestId: string;
-      readonly code: "INVALID_REQUEST" | "MODEL_LOAD_FAILED" | "INFERENCE_FAILED";
+      readonly code:
+        | "INVALID_REQUEST"
+        | "MODEL_ASSETS_MISSING"
+        | "MODEL_LOAD_FAILED"
+        | "INFERENCE_FAILED";
       readonly message: string;
     };

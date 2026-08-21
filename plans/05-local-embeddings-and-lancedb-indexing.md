@@ -76,3 +76,34 @@ Target approximately 93% line and function coverage for non-trivial provider orc
 ## Handoff
 
 Plan 06 builds retrieval and ranking over the persisted file/chunk schema and query-embedding provider.
+
+## Completion notes (2026-08-21)
+
+- Added a model-agnostic embedding provider contract and a Transformers.js BGE implementation. The
+  provisional q8 BGE-small profile and selectable BGE-base profile centralize model identity,
+  dimensions, context size, document/query encoding, normalization, batching, warm-up, and shutdown.
+- Added explicit `bun run model:setup` preparation. Normal indexing uses local-only Transformers.js
+  loading, while setup alone may download into the configured external model cache. A per-cache
+  integrity manifest records metadata and SHA-256 checksums, and remote loading is disabled before
+  inference begins.
+- Extended the proven Bun Worker boundary with offline/setup configuration and safe pipeline disposal.
+  A single warm model runs behind a bounded serial queue with deterministic backpressure,
+  cancellation, active-work-aware shutdown, structured failures, and vector dimension/L2 checks.
+- Added explicit non-null Arrow schemas for normalized `files` and `chunks` LanceDB tables. The chunk
+  vector is a configured fixed-size Float32 list; records preserve display/search text, path metadata,
+  line/offset navigation, heading/symbol context, hashes, fingerprints, statuses, and versions.
+- Added compatibility-gated open/rebuild behavior. Fresh namespaces initialize automatically;
+  mismatched/corrupt metadata, missing tables, and incompatible schemas require an explicit controlled
+  rebuild. Compatibility metadata is written only after both tables validate.
+- Added incremental indexing with unchanged-file skips, metadata-only commits, stable chunk-vector
+  reuse, batched inference, atomic per-file chunk replacement, file commit markers, idempotent deletes,
+  safe per-file failures, structured progress/ETA, and crash recovery without duplicate or half-file
+  chunk sets.
+- Added BM25 full-text and scalar metadata indexes, with exact vector scanning below a configurable
+  50,000-chunk threshold and IVF-Flat cosine indexing above it.
+- Added deterministic fake embeddings, real temporary-LanceDB integration coverage, a real Bun Worker
+  fixture for backpressure/cancellation/shutdown, and an opt-in local-assets q8 BGE smoke test. The
+  full default suite has 201 tests (200 passing and one skipped opt-in smoke test) and reports above 98%
+  aggregate line/function coverage; Plan 5's non-trivial provider, storage, recovery, and orchestration
+  modules meet or exceed the 93% target. Full contracts and Plan 6 handoff details are recorded in
+  `docs/plan-05-local-embeddings-and-indexing.md`.

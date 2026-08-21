@@ -14,6 +14,7 @@
     "serve": "\"$npm_execpath\" run build:ui && \"$npm_execpath\" run src/server/index.ts",
     "typecheck": "tsc --noEmit",
     "lint": "biome check .",
+    "model:setup": "\"$npm_execpath\" run scripts/setup-model.ts",
     "format": "biome format --write .",
     "test": "\"$npm_execpath\" test",
     "test:coverage": "\"$npm_execpath\" test --coverage --coverage-reporter=text",
@@ -22,6 +23,7 @@
   "dependencies": {
     "@huggingface/transformers": "4.2.0",
     "@lancedb/lancedb": "0.37.1",
+    "apache-arrow": "18.1.0",
     "react": "19.2.8",
     "react-dom": "19.2.8"
   },

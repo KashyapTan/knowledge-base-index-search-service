@@ -89,6 +89,7 @@ async function main(): Promise<void> {
       dtype: PROVISIONAL_EMBEDDING_MODEL.dtype,
       expectedDimension: PROVISIONAL_EMBEDDING_MODEL.dimension,
       cacheDir: join(compatibilityDirectory, "models"),
+      localFilesOnly: false,
     });
     const healthWhileLoading = await probeHealth(server.url);
     await initialization;

@@ -9,13 +9,27 @@ interface PendingRequest {
   readonly reject: (error: Error) => void;
 }
 
+export class EmbeddingWorkerError extends Error {
+  readonly code: Extract<EmbeddingWorkerResponse, { kind: "error" }>["code"];
+
+  constructor(response: Extract<EmbeddingWorkerResponse, { kind: "error" }>) {
+    super(response.message);
+    this.name = "EmbeddingWorkerError";
+    this.code = response.code;
+  }
+}
+
 export class EmbeddingWorkerClient {
   readonly #worker: Worker;
   readonly #pending = new Map<string, PendingRequest>();
   #closed = false;
 
-  constructor(workerUrl = new URL("./embedding.worker.ts", import.meta.url).href) {
-    this.#worker = new Worker(workerUrl, { name: "kbiss-embedding", ref: true });
+  constructor(
+    workerUrl: string | URL = new URL("./embedding.worker.ts", import.meta.url),
+    workerFactory: (url: string | URL) => Worker = (url) =>
+      new Worker(url, { name: "kbiss-embedding", ref: true }),
+  ) {
+    this.#worker = workerFactory(workerUrl);
     this.#worker.onmessage = (event: MessageEvent<EmbeddingWorkerResponse>) => {
       const pending = this.#pending.get(event.data.requestId);
       if (!pending) return;
@@ -75,7 +89,7 @@ export class EmbeddingWorkerClient {
     expectedKind: TKind,
   ): asserts response is Extract<EmbeddingWorkerResponse, { kind: TKind }> {
     if (response.kind === "error") {
-      throw new Error(`${response.code}: ${response.message}`);
+      throw new EmbeddingWorkerError(response);
     }
     if (response.kind !== expectedKind) {
       throw new Error(`Expected worker response ${expectedKind}, received ${response.kind}.`);

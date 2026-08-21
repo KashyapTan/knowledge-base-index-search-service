@@ -4,7 +4,8 @@ KBISS is a local-only search application for the `card-gateway-artifacts` reposi
 implementation includes the Bun/React foundation, validated runtime configuration, external
 per-user state layout, index compatibility checks, and a resumable file-discovery manifest with
 safe recursive watching. It also includes local-only, structure-aware text extraction and
-tokenizer-bounded chunking. Embedding persistence and search intentionally begin in later plans.
+tokenizer-bounded chunking, local Worker-based BGE embeddings, and resumable LanceDB file/chunk
+indexing. Hybrid retrieval and the complete server lifecycle intentionally begin in later plans.
 
 ## Requirements
 
@@ -12,12 +13,14 @@ tokenizer-bounded chunking. Embedding persistence and search intentionally begin
 - A platform supported by the pinned native packages; Plan 1 is verified on macOS arm64
 - Internet access for the first compatibility run, which downloads the public BGE model into a
   temporary directory and removes it when the check ends
+- Internet access for the explicit first `model:setup`; indexing after setup remains offline
 
 ## Install and run
 
 ```sh
 bun install --frozen-lockfile
 bun run compat
+bun run model:setup
 bun run serve
 ```
 
@@ -33,6 +36,12 @@ the project:
 bun run serve --root /path/to/card-gateway-artifacts --port 3210
 ```
 
+`bun run model:setup` is the explicit, one-time network-enabled model preparation step. It downloads
+only the configured model into KBISS's external per-user cache and writes an integrity manifest.
+Normal indexing first verifies that manifest and starts Transformers.js with remote model loading
+disabled. Pass the same `--root`, `--model`, and embedding options used for `serve` when overriding
+defaults.
+
 Configuration precedence is command-line options, `KBISS_*` environment variables, the per-user
 `config.json`, then defaults. See [Plan 2 runtime configuration](docs/plan-02-runtime-configuration.md)
 for every setting and the OS-specific state layout. KBISS never creates the source root and never
@@ -47,6 +56,7 @@ writes indexes or model assets into either repository.
 | `bun run serve` | Build and serve the production UI asset on loopback. |
 | `bun run typecheck` | Run strict TypeScript without emitting JavaScript. |
 | `bun run lint` | Check formatting and lint rules with Biome. |
+| `bun run model:setup` | Explicitly download/verify the configured model in the external local cache. |
 | `bun run format` | Apply the repository formatter. |
 | `bun test` | Run focused Bun tests. |
 | `bun run test:coverage` | Run Bun tests with line and function coverage. |
@@ -60,7 +70,7 @@ src/
   config/       validated runtime configuration and local-state contracts
   discovery/    deterministic scanning, manifest persistence, and reconciled watching
   extraction/   safe format-aware extraction, source mapping, and tokenizer-bounded chunking
-  indexing/     embedding worker boundary and later persistence pipeline
+  indexing/     offline embedding provider, bounded Worker queue, and resumable LanceDB pipeline
   search/       hybrid retrieval and aggregation (Plan 6)
   shared/       environment-independent contracts and result/error conventions
   ui/           React/Vite browser application
@@ -77,3 +87,5 @@ configuration and persisted-state contracts. See
 watcher contracts consumed by extraction and indexing.
 See [Plan 4 text extraction](docs/plan-04-text-extraction.md) for extractor selection, normalized
 source mapping, chunk identity, token-limit, and Plan 5 persistence contracts.
+See [Plan 5 local indexing](docs/plan-05-local-embeddings-and-indexing.md) for offline model setup,
+LanceDB schemas, commit/recovery semantics, progress events, and Plan 6 retrieval contracts.
