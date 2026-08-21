@@ -1,4 +1,4 @@
-import { type FeatureExtractionPipeline, pipeline } from "@huggingface/transformers";
+import { env, type FeatureExtractionPipeline, pipeline } from "@huggingface/transformers";
 import type {
   EmbeddingWorkerConfig,
   EmbeddingWorkerRequest,
@@ -22,18 +22,30 @@ async function initialize(
   request: Extract<EmbeddingWorkerRequest, { kind: "initialize" }>,
 ): Promise<void> {
   try {
+    if (extractor) await extractor.dispose();
+    extractor = undefined;
+    activeConfig = undefined;
+    env.allowLocalModels = true;
+    env.allowRemoteModels = !request.config.localFilesOnly;
+    env.cacheDir = request.config.cacheDir;
     extractor = await pipeline("feature-extraction", request.config.modelId, {
       cache_dir: request.config.cacheDir,
       dtype: request.config.dtype,
+      local_files_only: request.config.localFilesOnly,
     });
+    // Inference never needs the network, including after an explicit setup download.
+    env.allowRemoteModels = false;
     activeConfig = request.config;
     post({ kind: "ready", requestId: request.requestId, modelId: request.config.modelId });
   } catch (error) {
+    env.allowRemoteModels = false;
     post({
       kind: "error",
       requestId: request.requestId,
-      code: "MODEL_LOAD_FAILED",
-      message: errorMessage(error),
+      code: request.config.localFilesOnly ? "MODEL_ASSETS_MISSING" : "MODEL_LOAD_FAILED",
+      message: request.config.localFilesOnly
+        ? "The configured model assets are not available in the local model cache. Run model setup before indexing."
+        : errorMessage(error),
     });
   }
 }
@@ -95,9 +107,13 @@ self.onmessage = (event: MessageEvent<EmbeddingWorkerRequest>) => {
       void embed(request);
       break;
     case "shutdown":
-      extractor = undefined;
-      activeConfig = undefined;
-      post({ kind: "stopped", requestId: request.requestId });
+      void (async () => {
+        if (extractor) await extractor.dispose();
+        extractor = undefined;
+        activeConfig = undefined;
+        env.allowRemoteModels = false;
+        post({ kind: "stopped", requestId: request.requestId });
+      })();
       break;
   }
 };
