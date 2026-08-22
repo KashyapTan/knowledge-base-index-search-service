@@ -41,7 +41,7 @@ export function fakeEmbeddingProfile(id = "deterministic-fake"): EmbeddingProfil
   };
 }
 
-function deterministicVector(text: string, dimension: number): readonly number[] {
+function deterministicVector(text: string, dimension: number): Float32Array {
   const digest = createHash("sha256").update(text).digest();
   const vector = Array.from(
     { length: dimension },
@@ -50,9 +50,9 @@ function deterministicVector(text: string, dimension: number): readonly number[]
   const norm = Math.sqrt(vector.reduce((sum, value) => sum + value * value, 0));
   if (norm === 0) {
     vector[0] = 1;
-    return vector;
+    return Float32Array.from(vector);
   }
-  return vector.map((value) => value / norm);
+  return Float32Array.from(vector, (value) => value / norm);
 }
 
 export class FakeEmbeddingProvider implements EmbeddingProvider {
@@ -101,7 +101,7 @@ export class FakeEmbeddingProvider implements EmbeddingProvider {
   async embedDocuments(
     texts: readonly string[],
     options: EmbedOptions = {},
-  ): Promise<Result<readonly (readonly number[])[], EmbeddingError>> {
+  ): Promise<Result<readonly Float32Array[], EmbeddingError>> {
     if (this.#closed)
       return err({ code: "EMBEDDING_PROVIDER_CLOSED", message: "The fake provider is closed." });
     if (!this.#ready)
@@ -112,7 +112,7 @@ export class FakeEmbeddingProvider implements EmbeddingProvider {
     if (failOnText && texts.some((text) => text.includes(failOnText))) {
       return err({ code: "INFERENCE_FAILED", message: "Deterministic fake inference failed." });
     }
-    const vectors: (readonly number[])[] = [];
+    const vectors: Float32Array[] = [];
     const total = Math.ceil(texts.length / this.batchSize);
     for (let offset = 0; offset < texts.length; offset += this.batchSize) {
       const batch = texts.slice(offset, offset + this.batchSize);
@@ -120,7 +120,19 @@ export class FakeEmbeddingProvider implements EmbeddingProvider {
       vectors.push(
         ...batch.map((text) => deterministicVector(text, this.identity.vectorDimension)),
       );
-      options.onBatch?.(Math.floor(offset / this.batchSize) + 1, total);
+      const counts = options.tokenCounts?.slice(offset, offset + batch.length);
+      const maximumTokens = Math.max(...(counts ?? [this.identity.maximumTokens]));
+      const paddedTokens = maximumTokens * batch.length;
+      const usefulTokens = counts?.reduce((sum, value) => sum + value, 0) ?? paddedTokens;
+      options.onBatch?.(Math.floor(offset / this.batchSize) + 1, total, {
+        batchSize: batch.length,
+        maximumTokens,
+        usefulTokens,
+        paddedTokens,
+        fillRatio: usefulTokens / paddedTokens,
+        queueWaitMs: 0,
+        inferenceMs: 0,
+      });
     }
     return ok(vectors);
   }
@@ -128,7 +140,7 @@ export class FakeEmbeddingProvider implements EmbeddingProvider {
   async embedQuery(
     text: string,
     options: Pick<EmbedOptions, "signal"> = {},
-  ): Promise<Result<readonly number[], EmbeddingError>> {
+  ): Promise<Result<Float32Array, EmbeddingError>> {
     const result = await this.embedDocuments([text], options);
     if (!result.ok) return result;
     const vector = result.value[0];

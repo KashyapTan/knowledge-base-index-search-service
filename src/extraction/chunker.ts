@@ -15,6 +15,25 @@ interface Fragment extends SourceRange {
   readonly symbols: readonly string[];
 }
 
+/** Bounded per-document fallback for tokenizers without verified offset mapping. */
+function cachedTokenCount(
+  count: (value: string) => number,
+  capacity = 4_096,
+): (value: string) => number {
+  const cache = new Map<string, number>();
+  return (value) => {
+    const cached = cache.get(value);
+    if (cached !== undefined) return cached;
+    const measured = count(value);
+    cache.set(value, measured);
+    if (cache.size > capacity) {
+      const oldest = cache.keys().next().value;
+      if (oldest !== undefined) cache.delete(oldest);
+    }
+    return measured;
+  };
+}
+
 function sha256(value: string): string {
   return createHash("sha256").update(value, "utf8").digest("hex");
 }
@@ -99,10 +118,10 @@ function splitUnit(
   document: ExtractedDocument,
   unit: ExtractedUnit,
   options: ChunkingOptions,
+  count: (value: string) => number,
 ): Fragment[] {
   const whole = unitFragment(unit);
-  if (options.tokenizer.count(enrich(document, whole)) <= options.index.chunkSizeTokens)
-    return [whole];
+  if (count(enrich(document, whole)) <= options.index.chunkSizeTokens) return [whole];
 
   const fragments: Fragment[] = [];
   let searchStart = 0;
@@ -111,7 +130,7 @@ function splitUnit(
     if (searchStart >= unit.searchText.length) break;
     const end = largestFittingEnd(unit.searchText, searchStart, (candidate) => {
       const probe = { ...whole, searchText: candidate, displayText: candidate };
-      return options.tokenizer.count(enrich(document, probe)) <= options.index.chunkSizeTokens;
+      return count(enrich(document, probe)) <= options.index.chunkSizeTokens;
     });
     const searchText = unit.searchText.slice(searchStart, end).trim();
     const ratioStart = searchStart / Math.max(1, unit.searchText.length);
@@ -138,7 +157,7 @@ function splitUnit(
       searchStart,
       end,
       options.index.chunkOverlapTokens,
-      (value) => options.tokenizer.count(value),
+      count,
     );
     searchStart = nextStart > searchStart ? nextStart : end;
   }
@@ -166,9 +185,10 @@ function createChunk(
   fragment: Fragment,
   ordinal: number,
   options: ChunkingOptions,
+  count: (value: string) => number,
 ): SearchChunk {
   const searchText = enrich(document, fragment);
-  const tokenCount = options.tokenizer.count(searchText);
+  const tokenCount = count(searchText);
   if (tokenCount > options.maxTokens) {
     throw new Error(
       `Chunk ${ordinal} uses ${tokenCount} tokens, above the ${options.maxTokens} limit.`,
@@ -208,9 +228,10 @@ export function chunkDocument(
   if (options.index.chunkSizeTokens > options.maxTokens) {
     throw new Error("The target chunk size cannot exceed the model token limit.");
   }
+  const count = cachedTokenCount((value) => options.tokenizer.count(value));
   const fragments = document.units
     .filter((unit) => unit.searchText.trim().length > 0)
-    .flatMap((unit) => splitUnit(document, unit, options));
+    .flatMap((unit) => splitUnit(document, unit, options, count));
   const chunks: SearchChunk[] = [];
   let start = 0;
   while (start < fragments.length) {
@@ -221,17 +242,14 @@ export function chunkDocument(
       if (!candidate) break;
       if (selected.length > 0 && !sameSection(selected[0] as Fragment, candidate)) break;
       const merged = mergeFragments([...selected, candidate]);
-      if (
-        selected.length > 0 &&
-        options.tokenizer.count(enrich(document, merged)) > options.index.chunkSizeTokens
-      ) {
+      if (selected.length > 0 && count(enrich(document, merged)) > options.index.chunkSizeTokens) {
         break;
       }
       selected.push(candidate);
       end += 1;
     }
     if (selected.length === 0) throw new Error("The tokenizer could not fit any chunk content.");
-    chunks.push(createChunk(document, mergeFragments(selected), chunks.length, options));
+    chunks.push(createChunk(document, mergeFragments(selected), chunks.length, options, count));
     if (end >= fragments.length) break;
 
     let overlapStart = end;
@@ -239,9 +257,9 @@ export function chunkDocument(
     for (let index = end - 1; index > start; index -= 1) {
       const fragment = fragments[index];
       if (!fragment || !sameSection(fragment, fragments[end] as Fragment)) break;
-      const count = options.tokenizer.count(fragment.searchText);
-      if (overlapTokens + count > options.index.chunkOverlapTokens) break;
-      overlapTokens += count;
+      const fragmentTokens = count(fragment.searchText);
+      if (overlapTokens + fragmentTokens > options.index.chunkOverlapTokens) break;
+      overlapTokens += fragmentTokens;
       overlapStart = index;
     }
     start = overlapStart === start ? end : overlapStart;

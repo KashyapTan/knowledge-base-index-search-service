@@ -35,16 +35,36 @@ interface QueueJob {
   readonly texts: readonly string[];
   readonly maximumTokens?: number;
   readonly signal?: AbortSignal;
-  readonly resolve: (result: Result<readonly Float32Array[], EmbeddingError>) => void;
+  readonly enqueuedAt: number;
+  readonly resolve: (result: Result<ExecutedBatch, EmbeddingError>) => void;
 }
 
 interface EmbeddingBatch {
   readonly texts: readonly string[];
   readonly indices: readonly number[];
   readonly maximumTokens?: number;
+  readonly tokenCounts?: readonly number[];
+}
+
+interface ExecutedBatch {
+  readonly vectors: readonly Float32Array[];
+  readonly queueWaitMs: number;
+  readonly inferenceMs: number;
 }
 
 export const ACCELERATOR_TOKEN_BUCKETS = Object.freeze([64, 128, 256, 384, 512] as const);
+
+/** Derives bounded shapes from the selected application's indexing limit. */
+export function acceleratorTokenBuckets(maximumTokens: number): readonly number[] {
+  if (!Number.isInteger(maximumTokens) || maximumTokens < 1) return [];
+  return [
+    ...new Set(
+      [1 / 8, 1 / 4, 1 / 2, 3 / 4, 1].map((ratio) =>
+        Math.max(1, Math.ceil((maximumTokens * ratio) / 8) * 8),
+      ),
+    ),
+  ].filter((value) => value <= maximumTokens);
+}
 
 export function acceleratorTokenBucket(
   tokenCount: number,
@@ -105,8 +125,12 @@ export class TransformersEmbeddingProvider implements EmbeddingProvider {
   readonly #availableWorkers: EmbeddingWorkerBoundary[];
   readonly #activeWorkers = new Set<EmbeddingWorkerBoundary>();
   readonly #maxQueue: number;
+  readonly #maxBatchTokens: number;
+  readonly #clock: () => number;
   readonly #queue: QueueJob[] = [];
   readonly #idleWaiters: Array<() => void> = [];
+  readonly #capacityWaiters: Array<(available: boolean) => void> = [];
+  #capacityReservations = 0;
   #closed = false;
   #ready = false;
   #shutdownPromise: Promise<void> | undefined;
@@ -122,6 +146,8 @@ export class TransformersEmbeddingProvider implements EmbeddingProvider {
       readonly worker?: EmbeddingWorkerBoundary;
       readonly workerCount?: number;
       readonly workerFactory?: () => EmbeddingWorkerBoundary;
+      readonly batchTokenBudget?: number;
+      readonly clock?: () => number;
     } = {},
   ) {
     const profile = options.profile ?? findEmbeddingModelProfile(embedding.modelId);
@@ -164,6 +190,14 @@ export class TransformersEmbeddingProvider implements EmbeddingProvider {
       1,
       Math.min(options.batchSize ?? execution.maximumBatchSize, execution.maximumBatchSize),
     );
+    this.#maxBatchTokens = Math.max(
+      this.identity.maximumTokens,
+      Math.min(
+        options.batchTokenBudget ?? execution.maximumBatchTokens,
+        execution.maximumBatchTokens,
+      ),
+    );
+    this.#clock = options.clock ?? performance.now.bind(performance);
     this.#maxQueue = options.maxQueue ?? 8;
     this.#cacheDir = cacheDir;
     const workerCount = Math.max(1, Math.min(4, options.workerCount ?? 1));
@@ -325,12 +359,25 @@ export class TransformersEmbeddingProvider implements EmbeddingProvider {
           firstError ??= result.error;
           return;
         }
-        for (const [vectorIndex, vector] of result.value.entries()) {
+        for (const [vectorIndex, vector] of result.value.vectors.entries()) {
           const inputIndex = batch.indices[vectorIndex];
           if (inputIndex !== undefined) vectors[inputIndex] = vector;
         }
         completed += 1;
-        options.onBatch?.(completed, batches.length);
+        const maximumTokens =
+          batch.maximumTokens ?? Math.max(...(batch.tokenCounts ?? [this.identity.maximumTokens]));
+        const paddedTokens = maximumTokens * batch.texts.length;
+        const usefulTokens =
+          batch.tokenCounts?.reduce((sum, value) => sum + value, 0) ?? paddedTokens;
+        options.onBatch?.(completed, batches.length, {
+          batchSize: batch.texts.length,
+          maximumTokens,
+          usefulTokens,
+          paddedTokens,
+          fillRatio: paddedTokens === 0 ? 1 : usefulTokens / paddedTokens,
+          queueWaitMs: result.value.queueWaitMs,
+          inferenceMs: result.value.inferenceMs,
+        });
       }
     };
     await Promise.all(
@@ -361,24 +408,60 @@ export class TransformersEmbeddingProvider implements EmbeddingProvider {
     };
   }
 
-  #enqueue(
+  async #enqueue(
     texts: readonly string[],
     maximumTokens?: number,
     signal?: AbortSignal,
-  ): Promise<Result<readonly Float32Array[], EmbeddingError>> {
-    if (this.#queue.length + this.#activeWorkers.size >= this.#maxQueue) {
-      return Promise.resolve(
-        err(embeddingFailure("EMBEDDING_QUEUE_FULL", "The bounded embedding queue is full.")),
+  ): Promise<Result<ExecutedBatch, EmbeddingError>> {
+    const available = await this.#waitForCapacity(signal);
+    if (!available) {
+      return err(
+        embeddingFailure(
+          signal?.aborted ? "EMBEDDING_CANCELLED" : "EMBEDDING_PROVIDER_CLOSED",
+          signal?.aborted ? "Embedding was cancelled." : "The embedding provider is closed.",
+        ),
+      );
+    }
+    this.#capacityReservations -= 1;
+    if (this.#closed) {
+      return err(
+        embeddingFailure("EMBEDDING_PROVIDER_CLOSED", "The embedding provider is closed."),
       );
     }
     return new Promise((resolve) => {
       this.#queue.push({
         texts,
+        enqueuedAt: this.#clock(),
         ...(maximumTokens ? { maximumTokens } : {}),
         ...(signal ? { signal } : {}),
         resolve,
       });
       void this.#pump();
+    });
+  }
+
+  #waitForCapacity(signal?: AbortSignal): Promise<boolean> {
+    if (this.#closed) return Promise.resolve(false);
+    if (signal?.aborted) return Promise.resolve(false);
+    if (
+      this.#queue.length + this.#activeWorkers.size + this.#capacityReservations <
+      this.#maxQueue
+    ) {
+      this.#capacityReservations += 1;
+      return Promise.resolve(true);
+    }
+    return new Promise((resolve) => {
+      const finish = (available: boolean) => {
+        signal?.removeEventListener("abort", abort);
+        resolve(available);
+      };
+      const abort = () => {
+        const index = this.#capacityWaiters.indexOf(finish);
+        if (index >= 0) this.#capacityWaiters.splice(index, 1);
+        finish(false);
+      };
+      this.#capacityWaiters.push(finish);
+      signal?.addEventListener("abort", abort, { once: true });
     });
   }
 
@@ -391,15 +474,21 @@ export class TransformersEmbeddingProvider implements EmbeddingProvider {
       return;
     }
     this.#activeWorkers.add(worker);
+    const queueWaitMs = Math.max(0, this.#clock() - job.enqueuedAt);
     if (job.signal?.aborted) {
       job.resolve(err(embeddingFailure("EMBEDDING_CANCELLED", "Embedding was cancelled.")));
     } else {
       try {
+        const inferenceStarted = this.#clock();
         const batch = await worker.embed(job.texts, job.maximumTokens);
+        const inferenceMs = Math.max(0, this.#clock() - inferenceStarted);
         if (job.signal?.aborted) {
           job.resolve(err(embeddingFailure("EMBEDDING_CANCELLED", "Embedding was cancelled.")));
         } else {
-          job.resolve(this.#validate(batch, job.texts.length));
+          const validated = this.#validate(batch, job.texts.length);
+          job.resolve(
+            validated.ok ? ok({ vectors: validated.value, queueWaitMs, inferenceMs }) : validated,
+          );
         }
       } catch (error) {
         job.resolve(err(mapWorkerError(error)));
@@ -407,6 +496,11 @@ export class TransformersEmbeddingProvider implements EmbeddingProvider {
     }
     this.#activeWorkers.delete(worker);
     this.#availableWorkers.push(worker);
+    const capacityWaiter = this.#capacityWaiters.shift();
+    if (capacityWaiter) {
+      this.#capacityReservations += 1;
+      capacityWaiter(true);
+    }
     if (this.#closed && this.#activeWorkers.size === 0) {
       for (const resolve of this.#idleWaiters.splice(0)) resolve();
     } else {
@@ -418,12 +512,23 @@ export class TransformersEmbeddingProvider implements EmbeddingProvider {
     const encoded = texts.map((text, index) => ({ index, text, tokenCount: tokenCounts?.[index] }));
     if (this.#execution.shapePolicy === "dynamic" || !tokenCounts) {
       const batches: EmbeddingBatch[] = [];
-      for (let offset = 0; offset < encoded.length; offset += this.batchSize) {
-        const inputs = encoded.slice(offset, offset + this.batchSize);
+      for (let offset = 0; offset < encoded.length; ) {
+        let end = offset;
+        let maximum = 0;
+        while (end < encoded.length && end - offset < this.batchSize) {
+          const count = encoded[end]?.tokenCount ?? this.identity.maximumTokens;
+          const nextMaximum = Math.max(maximum, count);
+          if (end > offset && nextMaximum * (end - offset + 1) > this.#maxBatchTokens) break;
+          maximum = nextMaximum;
+          end += 1;
+        }
+        const inputs = encoded.slice(offset, end);
         batches.push({
           indices: inputs.map((input) => input.index),
           texts: inputs.map((input) => input.text),
+          ...(tokenCounts ? { tokenCounts: inputs.map((input) => input.tokenCount ?? 0) } : {}),
         });
+        offset = end;
       }
       return batches;
     }
@@ -433,7 +538,7 @@ export class TransformersEmbeddingProvider implements EmbeddingProvider {
       const bucket = acceleratorTokenBucket(
         input.tokenCount ?? this.identity.maximumTokens,
         this.identity.maximumTokens,
-        this.#execution.tokenBuckets,
+        acceleratorTokenBuckets(this.identity.maximumTokens),
       );
       const grouped = byBucket.get(bucket) ?? [];
       grouped.push(input);
@@ -441,12 +546,17 @@ export class TransformersEmbeddingProvider implements EmbeddingProvider {
     }
     const batches: EmbeddingBatch[] = [];
     for (const [maximumTokens, inputs] of [...byBucket].sort(([left], [right]) => left - right)) {
-      for (let offset = 0; offset < inputs.length; offset += this.batchSize) {
-        const batch = inputs.slice(offset, offset + this.batchSize);
+      const bucketBatchSize = Math.max(
+        1,
+        Math.min(this.batchSize, Math.floor(this.#maxBatchTokens / maximumTokens)),
+      );
+      for (let offset = 0; offset < inputs.length; offset += bucketBatchSize) {
+        const batch = inputs.slice(offset, offset + bucketBatchSize);
         batches.push({
           indices: batch.map((input) => input.index),
           maximumTokens,
           texts: batch.map((input) => input.text),
+          tokenCounts: batch.map((input) => input.tokenCount ?? maximumTokens),
         });
       }
     }
@@ -460,6 +570,7 @@ export class TransformersEmbeddingProvider implements EmbeddingProvider {
         err(embeddingFailure("EMBEDDING_PROVIDER_CLOSED", "The embedding provider is closed.")),
       );
     }
+    for (const waiter of this.#capacityWaiters.splice(0)) waiter(false);
     if (this.#activeWorkers.size > 0)
       await new Promise<void>((resolve) => this.#idleWaiters.push(resolve));
     await Promise.all(this.#workers.map((worker) => worker.close()));

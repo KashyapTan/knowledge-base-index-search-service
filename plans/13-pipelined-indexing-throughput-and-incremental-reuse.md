@@ -207,3 +207,54 @@ integrated mutation flow, and matched large-corpus benchmark before handoff.
 Plan 14 freezes the optimized indexing implementation, separates dense and lexical search
 representations, expands human judgments, compares the supported model profiles, tunes retrieval,
 and selects the final default from quality/performance evidence.
+
+## Completion notes (2026-08-22)
+
+Implemented on branch `plan-13-pipelined-indexing-throughput`.
+
+- Replaced sequential 64-file indexing windows with a bounded, ordered prepare/embed/serialized-
+  commit pipeline. The retained 32-file configuration independently caps prepared and embedded
+  windows at two, applies backpressure, propagates cancellation through extraction and inference,
+  discards incomplete windows, and preserves the chunks-first/files-marker recovery invariant.
+- Added window-scoped, 128-ID-batched LanceDB projections containing only vector reuse identity and
+  typed vectors. Added a true files-table-only `updateFiles()` path, with benchmark and table-version
+  evidence that metadata-only updates never read or mutate chunks.
+- Added versioned hashes over exact profile-encoded document inputs and full profile compatibility.
+  Location-aware chunk IDs remain unchanged. Duplicate hashes use deterministic multiset matching,
+  so line movement reuses vectors without allowing incompatible prompts, profiles, dimensions, or
+  normalization to cross index boundaries. Index schema version 2 triggers a controlled rebuild.
+- Retained chunker version 2 and exact boundaries while adding a bounded per-document tokenizer-count
+  cache. Added format-wide equivalence/property coverage for ceilings, overlap, malformed/Unicode
+  content, and navigation.
+- Added generated application-limit token buckets, per-device padded-token budgets, larger short-
+  input batches, source-order restoration, and batch utilization metrics. Healthy extraction and
+  embedding queue saturation now waits instead of returning queue-full failures.
+- Kept Worker vectors as `Float32Array` through window assembly and LanceDB row construction, with
+  dimension and finite-value validation before commit. Benchmark reports now separate stage busy,
+  wait, and wall time and record bounded working sets, useful/padded tokens, metadata mass updates,
+  and large-file edit reuse.
+- The matched clean Xpdite benchmark (revision
+  `d9b101508af4dc35c675341c02f524159f2e913d`, 586 files/9,646 chunks, BGE-small WebGPU/fp16 on an
+  Apple M5 Pro) improved full-index wall time from 95,464.78 ms to 89,161.29 ms and throughput from
+  101.04 to 108.19 chunks/s. Sixteen metadata-only files embedded zero chunks without a chunks-table
+  version change; start/middle/end edits to a 1,451-chunk file each embedded one and reused 1,450.
+  The measured 1.607 GB process peak RSS (+14.76%) and schema-size increase are explicitly recorded;
+  owned in-flight vectors remained bounded at 2.20 MiB.
+
+Detailed contracts, measurements, reproduction command, limitations, and Plan 14 handoff are in
+`docs/plan-13-pipelined-indexing-throughput-and-incremental-reuse.md`.
+
+Verification completed:
+
+- `bun run typecheck`
+- `bun run lint`
+- `bun test`: 413 passed, 7 opt-in candidate smokes skipped, 0 failed
+- `bun run test:coverage`: governed gate passed at 94.51% lines and 95.74% functions; raw aggregate
+  was 97.29% lines and 96.98% functions
+- `bun run build`: production Vite build and final TypeScript check passed
+- `bun run test:e2e`: Playwright keyboard-search flow passed
+- `bun run smoke:operations`: controlled first setup and offline restart passed
+- `bun run test:relevance`: Recall@5/10 and MRR remained 1.0 with zero file failures
+- pinned BGE-small CPU/q8 cached-assets smoke: 1 passed with inference offline
+- matched BGE-small WebGPU/fp16 baseline, 64-file candidate, and retained 32-file combined
+  benchmarks completed; the combined report passed the Plan 13 release-evidence validator

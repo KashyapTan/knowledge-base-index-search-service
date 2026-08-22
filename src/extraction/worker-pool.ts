@@ -94,6 +94,7 @@ export class ExtractionWorkerClient implements ExtractionWorkerBoundary {
 
 interface QueueJob {
   readonly file: DiscoveredFile;
+  readonly signal?: AbortSignal;
   readonly resolve: (result: Result<ExtractedFile, ExtractionError>) => void;
 }
 
@@ -104,9 +105,11 @@ export class WorkerExtractionPool implements ExtractionPipeline {
   readonly #active = new Set<ExtractionWorkerBoundary>();
   readonly #queue: QueueJob[] = [];
   readonly #idleWaiters: Array<() => void> = [];
+  readonly #capacityWaiters: Array<(available: boolean) => void> = [];
   readonly #maxQueue: number;
   #initialization: Promise<void> | undefined;
   #closed = false;
+  #capacityReservations = 0;
 
   constructor(
     config: AppConfig,
@@ -127,14 +130,24 @@ export class WorkerExtractionPool implements ExtractionPipeline {
     this.#maxQueue = Math.max(workerCount, options.maxQueue ?? 256);
   }
 
-  process(file: DiscoveredFile): Promise<Result<ExtractedFile, ExtractionError>> {
-    if (this.#closed)
-      return Promise.resolve(err(this.#failure(file, "The extraction pool is closed.")));
-    if (this.#queue.length + this.#active.size >= this.#maxQueue) {
-      return Promise.resolve(err(this.#failure(file, "The bounded extraction queue is full.")));
+  async process(
+    file: DiscoveredFile,
+    options: { readonly signal?: AbortSignal } = {},
+  ): Promise<Result<ExtractedFile, ExtractionError>> {
+    if (this.#closed) return err(this.#failure(file, "The extraction pool is closed."));
+    const available = await this.#waitForCapacity(options.signal);
+    if (!available) {
+      return err(
+        this.#failure(
+          file,
+          options.signal?.aborted ? "Extraction was cancelled." : "The extraction pool is closed.",
+        ),
+      );
     }
+    this.#capacityReservations -= 1;
+    if (this.#closed) return err(this.#failure(file, "The extraction pool is closed."));
     return new Promise((resolve) => {
-      this.#queue.push({ file, resolve });
+      this.#queue.push({ file, ...(options.signal ? { signal: options.signal } : {}), resolve });
       void this.#ensureReady()
         .then(() => this.#pump())
         .catch(() => this.#failQueued("The extraction workers could not initialize."));
@@ -145,6 +158,7 @@ export class WorkerExtractionPool implements ExtractionPipeline {
     if (this.#closed) return;
     this.#closed = true;
     this.#failQueued("The extraction pool is closed.");
+    for (const waiter of this.#capacityWaiters.splice(0)) waiter(false);
     await this.#initialization?.catch(() => undefined);
     if (this.#active.size > 0)
       await new Promise<void>((resolve) => this.#idleWaiters.push(resolve));
@@ -164,6 +178,13 @@ export class WorkerExtractionPool implements ExtractionPipeline {
       const job = this.#queue.shift();
       if (!worker || !job) return;
       this.#active.add(worker);
+      if (job.signal?.aborted) {
+        this.#active.delete(worker);
+        this.#available.push(worker);
+        job.resolve(err(this.#failure(job.file, "Extraction was cancelled.")));
+        this.#releaseCapacity();
+        continue;
+      }
       void worker
         .extract(job.file)
         .then(job.resolve)
@@ -171,6 +192,7 @@ export class WorkerExtractionPool implements ExtractionPipeline {
         .finally(() => {
           this.#active.delete(worker);
           this.#available.push(worker);
+          this.#releaseCapacity();
           if (this.#closed && this.#active.size === 0) {
             for (const resolve of this.#idleWaiters.splice(0)) resolve();
           } else {
@@ -180,8 +202,39 @@ export class WorkerExtractionPool implements ExtractionPipeline {
     }
   }
 
+  #waitForCapacity(signal?: AbortSignal): Promise<boolean> {
+    if (this.#closed || signal?.aborted) return Promise.resolve(false);
+    if (this.#queue.length + this.#active.size + this.#capacityReservations < this.#maxQueue) {
+      this.#capacityReservations += 1;
+      return Promise.resolve(true);
+    }
+    return new Promise((resolve) => {
+      const finish = (available: boolean) => {
+        signal?.removeEventListener("abort", abort);
+        resolve(available);
+      };
+      const abort = () => {
+        const index = this.#capacityWaiters.indexOf(finish);
+        if (index >= 0) this.#capacityWaiters.splice(index, 1);
+        finish(false);
+      };
+      this.#capacityWaiters.push(finish);
+      signal?.addEventListener("abort", abort, { once: true });
+    });
+  }
+
+  #releaseCapacity(): void {
+    const waiter = this.#capacityWaiters.shift();
+    if (!waiter) return;
+    this.#capacityReservations += 1;
+    waiter(true);
+  }
+
   #failQueued(message: string): void {
-    for (const job of this.#queue.splice(0)) job.resolve(err(this.#failure(job.file, message)));
+    for (const job of this.#queue.splice(0)) {
+      job.resolve(err(this.#failure(job.file, message)));
+      this.#releaseCapacity();
+    }
   }
 
   #failure(file: DiscoveredFile, message: string): ExtractionError {

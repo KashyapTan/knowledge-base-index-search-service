@@ -12,6 +12,8 @@ export interface EmbeddingExecutionProfile {
   readonly defaultDtype: DataType;
   readonly dtypes: readonly DataType[];
   readonly maximumBatchSize: number;
+  /** Maximum padded token slots admitted to one inference call. */
+  readonly maximumBatchTokens: number;
   readonly shapePolicy: "dynamic" | "fixed-buckets";
   readonly tokenBuckets: readonly number[];
   readonly workerSessions: number;
@@ -84,6 +86,7 @@ const cpuQ8: EmbeddingExecutionProfile = {
   defaultDtype: "q8",
   dtypes: ["q8", "fp32"],
   maximumBatchSize: 16,
+  maximumBatchTokens: 8_192,
   shapePolicy: "dynamic",
   tokenBuckets: [],
   workerSessions: 2,
@@ -92,7 +95,8 @@ const cpuQ8: EmbeddingExecutionProfile = {
 const bgeWebGpu: EmbeddingExecutionProfile = {
   defaultDtype: "fp16",
   dtypes: ["fp16", "fp32"],
-  maximumBatchSize: 16,
+  maximumBatchSize: 32,
+  maximumBatchTokens: 8_192,
   shapePolicy: "fixed-buckets",
   tokenBuckets: [64, 128, 256, 384, 512],
   workerSessions: 1,
@@ -323,6 +327,11 @@ export function validateEmbeddingModelProfile(profile: EmbeddingModelProfile): r
       issues.push(`${device} has no valid default dtype`);
     if (!Number.isInteger(execution.maximumBatchSize) || execution.maximumBatchSize < 1)
       issues.push(`${device} has an invalid maximum batch size`);
+    if (
+      !Number.isInteger(execution.maximumBatchTokens) ||
+      execution.maximumBatchTokens < profile.applicationIndexingLimit
+    )
+      issues.push(`${device} has an invalid maximum batch token budget`);
     if (!Number.isInteger(execution.workerSessions) || execution.workerSessions < 1)
       issues.push(`${device} has an invalid Worker session count`);
     if (

@@ -21,7 +21,17 @@ export interface EmbedOptions {
   readonly signal?: AbortSignal;
   /** Exact tokenizer counts let accelerator backends build homogeneous fixed-shape batches. */
   readonly tokenCounts?: readonly number[];
-  readonly onBatch?: (completed: number, total: number) => void;
+  readonly onBatch?: (completed: number, total: number, metric?: EmbeddingBatchMetric) => void;
+}
+
+export interface EmbeddingBatchMetric {
+  readonly batchSize: number;
+  readonly maximumTokens: number;
+  readonly usefulTokens: number;
+  readonly paddedTokens: number;
+  readonly fillRatio: number;
+  readonly queueWaitMs: number;
+  readonly inferenceMs: number;
 }
 
 export type EmbeddingErrorCode =
@@ -103,6 +113,17 @@ export interface IndexedChunkRecord {
   readonly ordinal: number;
   readonly displayText: string;
   readonly searchText: string;
+  /** SHA-256 over the exact profile-encoded document input sent to inference. */
+  readonly embeddingInputHash: string;
+  readonly embeddingInputVersion: number;
+  readonly embeddingModelId: string;
+  readonly embeddingRevision: string;
+  readonly embeddingProfileVersion: number;
+  readonly embeddingDimension: number;
+  readonly poolingVersion: number;
+  readonly documentEncodingVersion: number;
+  readonly tokenizerVersion: number;
+  readonly normalization: "l2";
   readonly vector: EmbeddingVector;
   readonly startLine: number;
   readonly endLine: number;
@@ -118,6 +139,26 @@ export interface IndexedChunkRecord {
   readonly extractorVersion: number;
   readonly chunkerVersion: number;
   readonly indexSchemaVersion: number;
+}
+
+/** Minimal projected state used only to decide whether a prior vector is reusable. */
+export interface ReusableChunkRecord {
+  readonly chunkId: string;
+  readonly fileId: string;
+  readonly embeddingInputHash: string;
+  readonly embeddingInputVersion: number;
+  readonly embeddingModelId: string;
+  readonly embeddingRevision: string;
+  readonly embeddingProfileVersion: number;
+  readonly embeddingDimension: number;
+  readonly poolingVersion: number;
+  readonly documentEncodingVersion: number;
+  readonly tokenizerVersion: number;
+  readonly normalization: string;
+  readonly extractorVersion: number;
+  readonly chunkerVersion: number;
+  readonly indexSchemaVersion: number;
+  readonly vector: Float32Array;
 }
 
 export type IndexStoreErrorCode =
@@ -139,6 +180,11 @@ export interface IndexStore {
   getChunksForFiles(
     fileIds: readonly string[],
   ): Promise<Result<readonly IndexedChunkRecord[], IndexStoreError>>;
+  getReusableChunksForFiles(
+    fileIds: readonly string[],
+  ): Promise<Result<readonly ReusableChunkRecord[], IndexStoreError>>;
+  /** Updates only file markers/metadata. This operation must never touch the chunks table. */
+  updateFiles(files: readonly IndexedFileRecord[]): Promise<Result<void, IndexStoreError>>;
   replaceFile(
     file: IndexedFileRecord,
     chunks: readonly IndexedChunkRecord[],
@@ -206,6 +252,25 @@ export interface IndexingTiming {
   readonly embeddingMs: number;
   readonly commitMs: number;
   readonly finalizationMs: number;
+  readonly stageWaitMs?: {
+    readonly preparation: number;
+    readonly embedding: number;
+    readonly commit: number;
+  };
+  readonly pipelineWallMs?: number;
+  readonly maximumInFlight?: {
+    readonly preparedWindows: number;
+    readonly embeddedWindows: number;
+    readonly preparedFiles: number;
+    readonly preparedChunks: number;
+    readonly vectorBytes: number;
+  };
+  readonly embeddingUtilization?: {
+    readonly usefulTokens: number;
+    readonly paddedTokens: number;
+    readonly inferenceMs: number;
+    readonly batches: number;
+  };
 }
 
 export type IndexingErrorCode = "INDEXING_CANCELLED" | "INDEXING_FATAL";

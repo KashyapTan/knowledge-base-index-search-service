@@ -4,6 +4,7 @@ import type { DiscoveredFile, FileChange } from "../discovery/index.ts";
 import type { ExtractedFile, SearchChunk } from "../extraction/index.ts";
 import { err, ok, type Result } from "../shared/result.ts";
 import type {
+  EmbeddingBatchMetric,
   EmbeddingVector,
   IndexedChunkRecord,
   IndexedFileRecord,
@@ -14,7 +15,10 @@ import type {
   IndexingRunResult,
   IndexingService,
   IndexingTiming,
+  ReusableChunkRecord,
 } from "./contracts.ts";
+
+const EMBEDDING_INPUT_VERSION = 1;
 
 interface MutableProgress {
   phase: IndexingProgress["phase"];
@@ -34,12 +38,37 @@ interface MutableProgress {
   estimatedCompletionMs?: number;
 }
 
-type TimingStage = Exclude<keyof IndexingTiming, "totalMs">;
-type MutableTiming = Record<TimingStage, number>;
+interface MutableTiming {
+  warmUpMs: number;
+  preparationMs: number;
+  embeddingMs: number;
+  commitMs: number;
+  finalizationMs: number;
+  stageWaitMs: { preparation: number; embedding: number; commit: number };
+  pipelineWallMs: number;
+  maximumInFlight: {
+    preparedWindows: number;
+    embeddedWindows: number;
+    preparedFiles: number;
+    preparedChunks: number;
+    vectorBytes: number;
+  };
+  embeddingUtilization: {
+    usefulTokens: number;
+    paddedTokens: number;
+    inferenceMs: number;
+    batches: number;
+  };
+}
 
 interface FileIssue {
   readonly code: string;
   readonly message: string;
+}
+
+interface PreparedChunk {
+  readonly chunk: SearchChunk;
+  readonly embeddingInputHash: string;
 }
 
 type PreparedFile =
@@ -55,15 +84,22 @@ type PreparedFile =
       readonly kind: "metadata";
       readonly file: DiscoveredFile;
       readonly record: IndexedFileRecord;
-      readonly chunks: readonly IndexedChunkRecord[];
     }
   | {
       readonly kind: "content";
       readonly file: DiscoveredFile;
       readonly extracted: ExtractedFile;
+      readonly chunks: readonly PreparedChunk[];
       readonly reusable: ReadonlyMap<string, EmbeddingVector>;
-      readonly missing: readonly SearchChunk[];
+      readonly missing: readonly PreparedChunk[];
     };
+
+interface PreparedWindow {
+  readonly index: number;
+  readonly files: readonly PreparedFile[];
+  readonly preparedFiles: number;
+  readonly preparedChunks: number;
+}
 
 interface EmbeddedFile {
   readonly prepared: Extract<PreparedFile, { readonly kind: "content" }>;
@@ -71,17 +107,109 @@ interface EmbeddedFile {
   readonly error?: FileIssue;
 }
 
+interface EmbeddedWindow {
+  readonly prepared: PreparedWindow;
+  readonly files: readonly EmbeddedFile[];
+  readonly vectorBytes: number;
+}
+
+class AsyncChannel<T> {
+  readonly #items: T[] = [];
+  readonly #waiters: Array<(item: T | undefined) => void> = [];
+  #closed = false;
+
+  push(item: T): boolean {
+    if (this.#closed) return false;
+    const waiter = this.#waiters.shift();
+    if (waiter) waiter(item);
+    else this.#items.push(item);
+    return true;
+  }
+
+  shift(signal: AbortSignal): Promise<T | undefined> {
+    const item = this.#items.shift();
+    if (item !== undefined) return Promise.resolve(item);
+    if (this.#closed || signal.aborted) return Promise.resolve(undefined);
+    return new Promise((resolve) => {
+      const finish = (value: T | undefined) => {
+        signal.removeEventListener("abort", abort);
+        resolve(value);
+      };
+      const abort = () => {
+        const index = this.#waiters.indexOf(finish);
+        if (index >= 0) this.#waiters.splice(index, 1);
+        finish(undefined);
+      };
+      this.#waiters.push(finish);
+      signal.addEventListener("abort", abort, { once: true });
+    });
+  }
+
+  close(discard = false): void {
+    this.#closed = true;
+    if (discard) this.#items.length = 0;
+    if (this.#items.length === 0) {
+      for (const waiter of this.#waiters.splice(0)) waiter(undefined);
+    }
+  }
+}
+
+class AsyncSemaphore {
+  readonly #waiters: Array<(acquired: boolean) => void> = [];
+  #available: number;
+  #closed = false;
+
+  constructor(capacity: number) {
+    this.#available = capacity;
+  }
+
+  acquire(signal: AbortSignal): Promise<boolean> {
+    if (this.#closed || signal.aborted) return Promise.resolve(false);
+    if (this.#available > 0) {
+      this.#available -= 1;
+      return Promise.resolve(true);
+    }
+    return new Promise((resolve) => {
+      const finish = (acquired: boolean) => {
+        signal.removeEventListener("abort", abort);
+        resolve(acquired);
+      };
+      const abort = () => {
+        const index = this.#waiters.indexOf(finish);
+        if (index >= 0) this.#waiters.splice(index, 1);
+        finish(false);
+      };
+      this.#waiters.push(finish);
+      signal.addEventListener("abort", abort, { once: true });
+    });
+  }
+
+  release(): void {
+    if (this.#closed) return;
+    const waiter = this.#waiters.shift();
+    if (waiter) waiter(true);
+    else this.#available += 1;
+  }
+
+  close(): void {
+    this.#closed = true;
+    for (const waiter of this.#waiters.splice(0)) waiter(false);
+  }
+}
+
+function sha256(value: string): string {
+  return createHash("sha256").update(value, "utf8").digest("hex");
+}
+
 function stableFingerprint(file: DiscoveredFile): string {
-  return createHash("sha256")
-    .update(
-      JSON.stringify({
-        size: file.fingerprint.size,
-        modifiedAtNs: file.fingerprint.modifiedAtNs,
-        changedAtNs: file.fingerprint.changedAtNs,
-        contentHash: file.fingerprint.contentHash ?? "",
-      }),
-    )
-    .digest("hex");
+  return sha256(
+    JSON.stringify({
+      size: file.fingerprint.size,
+      modifiedAtNs: file.fingerprint.modifiedAtNs,
+      changedAtNs: file.fingerprint.changedAtNs,
+      contentHash: file.fingerprint.contentHash ?? "",
+    }),
+  );
 }
 
 function isCompatible(
@@ -135,6 +263,10 @@ function metadataRecord(
 ): IndexedFileRecord {
   return {
     ...record,
+    relativePath: file.relativePath,
+    filename: file.filename,
+    format: file.format,
+    mimeFamily: file.mimeFamily,
     fingerprintHash: stableFingerprint(file),
     size: file.fingerprint.size,
     modifiedAtMs: file.fingerprint.modifiedAtMs,
@@ -145,12 +277,39 @@ function metadataRecord(
   };
 }
 
+function embeddingInputHash(dependencies: IndexingDependencies, chunk: SearchChunk): string {
+  return sha256(
+    `embedding-input-v${EMBEDDING_INPUT_VERSION}\0${dependencies.embeddings.encodeDocument(chunk.searchText)}`,
+  );
+}
+
+function reusableCompatibility(config: AppConfig, candidate: ReusableChunkRecord): boolean {
+  const profile = config.embedding.profile;
+  return (
+    candidate.embeddingInputVersion === EMBEDDING_INPUT_VERSION &&
+    candidate.embeddingModelId === config.embedding.modelId &&
+    candidate.embeddingRevision === profile.revision &&
+    candidate.embeddingProfileVersion === profile.profileVersion &&
+    candidate.embeddingDimension === config.embedding.vectorDimension &&
+    candidate.poolingVersion === profile.pooling.version &&
+    candidate.documentEncodingVersion === profile.documentEncoding.version &&
+    candidate.tokenizerVersion === profile.tokenizer.version &&
+    candidate.normalization === config.embedding.normalization &&
+    candidate.extractorVersion === config.index.extractorVersion &&
+    candidate.chunkerVersion === config.index.chunkerVersion &&
+    candidate.indexSchemaVersion === config.index.schemaVersion &&
+    candidate.vector.length === config.embedding.vectorDimension &&
+    candidate.vector.every(Number.isFinite)
+  );
+}
+
 function chunkRecord(
   config: AppConfig,
   file: DiscoveredFile,
-  chunk: SearchChunk,
+  prepared: PreparedChunk,
   vector: EmbeddingVector,
 ): IndexedChunkRecord {
+  const chunk = prepared.chunk;
   return {
     chunkId: chunk.chunkId,
     fileId: chunk.fileId,
@@ -160,6 +319,16 @@ function chunkRecord(
     ordinal: chunk.ordinal,
     displayText: chunk.displayText,
     searchText: chunk.searchText,
+    embeddingInputHash: prepared.embeddingInputHash,
+    embeddingInputVersion: EMBEDDING_INPUT_VERSION,
+    embeddingModelId: config.embedding.modelId,
+    embeddingRevision: config.embedding.profile.revision,
+    embeddingProfileVersion: config.embedding.profile.profileVersion,
+    embeddingDimension: config.embedding.vectorDimension,
+    poolingVersion: config.embedding.profile.pooling.version,
+    documentEncodingVersion: config.embedding.profile.documentEncoding.version,
+    tokenizerVersion: config.embedding.profile.tokenizer.version,
+    normalization: config.embedding.normalization,
     vector,
     startLine: chunk.startLine,
     endLine: chunk.endLine,
@@ -201,7 +370,22 @@ function snapshot(progress: MutableProgress): IndexingProgress {
 }
 
 function timingSnapshot(timing: MutableTiming, totalMs: number): IndexingTiming {
-  return { totalMs, ...timing };
+  return {
+    totalMs,
+    warmUpMs: timing.warmUpMs,
+    preparationMs: timing.preparationMs,
+    embeddingMs: timing.embeddingMs,
+    commitMs: timing.commitMs,
+    finalizationMs: timing.finalizationMs,
+    stageWaitMs: { ...timing.stageWaitMs },
+    pipelineWallMs: timing.pipelineWallMs,
+    maximumInFlight: { ...timing.maximumInFlight },
+    embeddingUtilization: { ...timing.embeddingUtilization },
+  };
+}
+
+function elapsed(clock: () => number, started: number): number {
+  return Math.max(0, clock() - started);
 }
 
 export class RepositoryIndexingService implements IndexingService {
@@ -211,6 +395,8 @@ export class RepositoryIndexingService implements IndexingService {
   readonly #now: () => number;
   readonly #clock: () => number;
   readonly #windowSize: number;
+  readonly #preparedCapacity: number;
+  readonly #embeddedCapacity: number;
 
   constructor(
     config: AppConfig,
@@ -219,13 +405,17 @@ export class RepositoryIndexingService implements IndexingService {
       readonly now?: () => number;
       readonly clock?: () => number;
       readonly preparationWindowSize?: number;
+      readonly preparedWindowCapacity?: number;
+      readonly embeddedWindowCapacity?: number;
     } = {},
   ) {
     this.#config = config;
     this.#dependencies = dependencies;
     this.#now = options.now ?? Date.now;
     this.#clock = options.clock ?? performance.now.bind(performance);
-    this.#windowSize = Math.max(1, Math.min(256, options.preparationWindowSize ?? 64));
+    this.#windowSize = Math.max(1, Math.min(256, options.preparationWindowSize ?? 32));
+    this.#preparedCapacity = Math.max(1, Math.min(4, options.preparedWindowCapacity ?? 2));
+    this.#embeddedCapacity = Math.max(1, Math.min(4, options.embeddedWindowCapacity ?? 2));
   }
 
   subscribeProgress(listener: (progress: IndexingProgress) => void): () => void {
@@ -277,25 +467,35 @@ export class RepositoryIndexingService implements IndexingService {
       embeddingMs: 0,
       commitMs: 0,
       finalizationMs: 0,
+      stageWaitMs: { preparation: 0, embedding: 0, commit: 0 },
+      pipelineWallMs: 0,
+      maximumInFlight: {
+        preparedWindows: 0,
+        embeddedWindows: 0,
+        preparedFiles: 0,
+        preparedChunks: 0,
+        vectorBytes: 0,
+      },
+      embeddingUtilization: { usefulTokens: 0, paddedTokens: 0, inferenceMs: 0, batches: 0 },
     };
     const startedAt = this.#now();
     const totalStarted = this.#clock();
     let searchDataChanged = false;
     this.#publish(progress);
 
-    const warm = await this.#timed(timing, "warmUpMs", () =>
-      this.#dependencies.embeddings.warmUp(),
-    );
+    const warmStarted = this.#clock();
+    const warm = await this.#dependencies.embeddings.warmUp();
+    timing.warmUpMs += elapsed(this.#clock, warmStarted);
     if (!warm.ok) return err({ code: "INDEXING_FATAL", message: warm.error.message });
 
     for (const change of deletions) {
-      if (this.#cancelled(signal, progress)) return this.#cancelError();
+      if (signal?.aborted) return this.#cancel(progress);
       progress.currentFile = change.relativePath;
       progress.phase = "deleting";
       this.#publish(progress);
-      const deleted = await this.#timed(timing, "commitMs", () =>
-        this.#dependencies.store.deleteFile(change.fileId),
-      );
+      const commitStarted = this.#clock();
+      const deleted = await this.#dependencies.store.deleteFile(change.fileId);
+      timing.commitMs += elapsed(this.#clock, commitStarted);
       if (!deleted.ok)
         this.#recordError(progress, change.fileId, change.relativePath, deleted.error);
       else {
@@ -308,72 +508,24 @@ export class RepositoryIndexingService implements IndexingService {
     const ordered = [...files].sort((left, right) =>
       left.relativePath.localeCompare(right.relativePath),
     );
-    const existing = await this.#timed(timing, "preparationMs", () =>
-      this.#dependencies.store.getFiles(ordered.map((file) => file.fileId)),
-    );
-    if (!existing.ok) return err({ code: "INDEXING_FATAL", message: existing.error.message });
-    const existingById = new Map(existing.value.map((file) => [file.fileId, file]));
-    const priorCandidateIds = ordered
-      .filter((file) => {
-        const record = existingById.get(file.fileId);
-        return (
-          file.readStatus === "ready" &&
-          Boolean(file.fingerprint.contentHash) &&
-          !(
-            isCompatible(this.#config, file, record) &&
-            record?.fingerprintHash === stableFingerprint(file)
-          )
-        );
-      })
-      .map((file) => file.fileId);
-    const prior = await this.#timed(timing, "preparationMs", () =>
-      this.#dependencies.store.getChunksForFiles(priorCandidateIds),
-    );
-    if (!prior.ok) return err({ code: "INDEXING_FATAL", message: prior.error.message });
-    const priorByFile = new Map<string, IndexedChunkRecord[]>();
-    for (const chunk of prior.value) {
-      const chunks = priorByFile.get(chunk.fileId) ?? [];
-      chunks.push(chunk);
-      priorByFile.set(chunk.fileId, chunks);
-    }
-
-    for (let offset = 0; offset < ordered.length; offset += this.#windowSize) {
-      if (this.#cancelled(signal, progress)) return this.#cancelError();
-      const window = ordered.slice(offset, offset + this.#windowSize);
-      const prepared = await this.#timed(timing, "preparationMs", () =>
-        Promise.all(
-          window.map((file) =>
-            this.#prepareFile(
-              file,
-              existingById.get(file.fileId),
-              priorByFile.get(file.fileId) ?? [],
-              progress,
-            ),
-          ),
-        ),
-      );
-      if (this.#cancelled(signal, progress)) return this.#cancelError();
-      for (const item of prepared) {
-        if (item.kind === "content") progress.totalChunks += item.extracted.chunks.length;
+    if (ordered.length > 0) {
+      const pipelineStarted = this.#clock();
+      const pipelined = await this.#runPipeline(ordered, progress, timing, startedAt, signal);
+      timing.pipelineWallMs = elapsed(this.#clock, pipelineStarted);
+      if (!pipelined.ok) {
+        if (pipelined.error.code === "INDEXING_CANCELLED") return this.#cancel(progress);
+        return pipelined;
       }
-      const embedded = await this.#timed(timing, "embeddingMs", () =>
-        this.#embedWindow(prepared, progress, signal),
-      );
-      if (!embedded.ok) return embedded;
-      if (this.#cancelled(signal, progress)) return this.#cancelError();
-      const committed = await this.#timed(timing, "commitMs", () =>
-        this.#commitWindow(prepared, embedded.value, progress, startedAt),
-      );
-      searchDataChanged ||= committed;
+      searchDataChanged ||= pipelined.value;
     }
 
     delete progress.currentFile;
     progress.phase = "finalizing";
     this.#publish(progress);
     if (searchDataChanged) {
-      const refreshed = await this.#timed(timing, "finalizationMs", () =>
-        this.#dependencies.store.refreshSearchIndexes(),
-      );
+      const finalStarted = this.#clock();
+      const refreshed = await this.#dependencies.store.refreshSearchIndexes();
+      timing.finalizationMs += elapsed(this.#clock, finalStarted);
       if (!refreshed.ok) return err({ code: "INDEXING_FATAL", message: refreshed.error.message });
     }
     progress.phase = "complete";
@@ -381,15 +533,263 @@ export class RepositoryIndexingService implements IndexingService {
     this.#publish(progress);
     return ok({
       progress: snapshot(progress),
-      timing: timingSnapshot(timing, this.#clock() - totalStarted),
+      timing: timingSnapshot(timing, elapsed(this.#clock, totalStarted)),
     });
+  }
+
+  async #runPipeline(
+    ordered: readonly DiscoveredFile[],
+    progress: MutableProgress,
+    timing: MutableTiming,
+    startedAt: number,
+    externalSignal?: AbortSignal,
+  ): Promise<Result<boolean, IndexingError>> {
+    const controller = new AbortController();
+    const signal = controller.signal;
+    const prepared = new AsyncChannel<PreparedWindow>();
+    const embedded = new AsyncChannel<EmbeddedWindow>();
+    const preparedSlots = new AsyncSemaphore(this.#preparedCapacity);
+    const embeddedSlots = new AsyncSemaphore(this.#embeddedCapacity);
+    let preparedWindows = 0;
+    let embeddedWindows = 0;
+    let preparedFiles = 0;
+    let preparedChunks = 0;
+    let vectorBytes = 0;
+    let fatal: IndexingError | undefined;
+    let changed = false;
+
+    const abort = () => controller.abort();
+    externalSignal?.addEventListener("abort", abort, { once: true });
+    if (externalSignal?.aborted) controller.abort();
+
+    const fail = (error: IndexingError) => {
+      fatal ??= error;
+      controller.abort();
+      prepared.close(true);
+      embedded.close(true);
+      preparedSlots.close();
+      embeddedSlots.close();
+    };
+    const updateMaximum = () => {
+      timing.maximumInFlight.preparedWindows = Math.max(
+        timing.maximumInFlight.preparedWindows,
+        preparedWindows,
+      );
+      timing.maximumInFlight.embeddedWindows = Math.max(
+        timing.maximumInFlight.embeddedWindows,
+        embeddedWindows,
+      );
+      timing.maximumInFlight.preparedFiles = Math.max(
+        timing.maximumInFlight.preparedFiles,
+        preparedFiles,
+      );
+      timing.maximumInFlight.preparedChunks = Math.max(
+        timing.maximumInFlight.preparedChunks,
+        preparedChunks,
+      );
+      timing.maximumInFlight.vectorBytes = Math.max(
+        timing.maximumInFlight.vectorBytes,
+        vectorBytes,
+      );
+    };
+
+    const produce = async () => {
+      try {
+        for (
+          let offset = 0, index = 0;
+          offset < ordered.length;
+          offset += this.#windowSize, index++
+        ) {
+          const waitStarted = this.#clock();
+          const acquired = await preparedSlots.acquire(signal);
+          timing.stageWaitMs.preparation += elapsed(this.#clock, waitStarted);
+          if (!acquired || signal.aborted) break;
+          const busyStarted = this.#clock();
+          const result = await this.#prepareWindow(
+            index,
+            ordered.slice(offset, offset + this.#windowSize),
+            progress,
+            signal,
+          );
+          timing.preparationMs += elapsed(this.#clock, busyStarted);
+          if (!result.ok) {
+            preparedSlots.release();
+            fail(result.error);
+            break;
+          }
+          if (signal.aborted) {
+            preparedSlots.release();
+            break;
+          }
+          preparedWindows += 1;
+          preparedFiles += result.value.preparedFiles;
+          preparedChunks += result.value.preparedChunks;
+          updateMaximum();
+          if (!prepared.push(result.value)) {
+            preparedSlots.release();
+            break;
+          }
+        }
+      } catch (error) {
+        fail({
+          code: "INDEXING_FATAL",
+          message: error instanceof Error ? error.message : "Index preparation failed.",
+        });
+      } finally {
+        prepared.close();
+      }
+    };
+
+    const embedWindows = async () => {
+      try {
+        for (;;) {
+          const waitStarted = this.#clock();
+          const window = await prepared.shift(signal);
+          timing.stageWaitMs.embedding += elapsed(this.#clock, waitStarted);
+          if (!window) break;
+          const vectorWaitStarted = this.#clock();
+          const acquired = await embeddedSlots.acquire(signal);
+          timing.stageWaitMs.embedding += elapsed(this.#clock, vectorWaitStarted);
+          if (!acquired || signal.aborted) {
+            preparedSlots.release();
+            break;
+          }
+          const busyStarted = this.#clock();
+          const result = await this.#embedWindow(window, progress, timing, signal);
+          timing.embeddingMs += elapsed(this.#clock, busyStarted);
+          if (!result.ok) {
+            embeddedSlots.release();
+            preparedSlots.release();
+            if (result.error.code === "INDEXING_CANCELLED") controller.abort();
+            else fail(result.error);
+            break;
+          }
+          preparedWindows -= 1;
+          preparedFiles -= window.preparedFiles;
+          preparedChunks -= window.preparedChunks;
+          preparedSlots.release();
+          if (signal.aborted) {
+            embeddedSlots.release();
+            break;
+          }
+          embeddedWindows += 1;
+          vectorBytes += result.value.vectorBytes;
+          updateMaximum();
+          if (!embedded.push(result.value)) {
+            embeddedSlots.release();
+            break;
+          }
+        }
+      } catch (error) {
+        fail({
+          code: "INDEXING_FATAL",
+          message: error instanceof Error ? error.message : "Embedding failed.",
+        });
+      } finally {
+        embedded.close();
+      }
+    };
+
+    const commitWindows = async () => {
+      try {
+        let expectedIndex = 0;
+        for (;;) {
+          const waitStarted = this.#clock();
+          const window = await embedded.shift(signal);
+          timing.stageWaitMs.commit += elapsed(this.#clock, waitStarted);
+          if (!window) break;
+          if (signal.aborted) {
+            embeddedSlots.release();
+            break;
+          }
+          if (window.prepared.index !== expectedIndex) {
+            fail({
+              code: "INDEXING_FATAL",
+              message: "Index windows reached the writer out of order.",
+            });
+            embeddedSlots.release();
+            break;
+          }
+          expectedIndex += 1;
+          const busyStarted = this.#clock();
+          const windowChanged = await this.#commitWindow(window, progress, startedAt, signal);
+          changed ||= windowChanged;
+          timing.commitMs += elapsed(this.#clock, busyStarted);
+          embeddedWindows -= 1;
+          vectorBytes -= window.vectorBytes;
+          embeddedSlots.release();
+        }
+      } catch (error) {
+        fail({
+          code: "INDEXING_FATAL",
+          message: error instanceof Error ? error.message : "Index persistence failed.",
+        });
+      }
+    };
+
+    await Promise.all([produce(), embedWindows(), commitWindows()]);
+    externalSignal?.removeEventListener("abort", abort);
+    preparedSlots.close();
+    embeddedSlots.close();
+    if (fatal) return err(fatal);
+    if (externalSignal?.aborted || signal.aborted) return this.#cancelError();
+    return ok(changed);
+  }
+
+  async #prepareWindow(
+    index: number,
+    window: readonly DiscoveredFile[],
+    progress: MutableProgress,
+    signal: AbortSignal,
+  ): Promise<Result<PreparedWindow, IndexingError>> {
+    const existing = await this.#dependencies.store.getFiles(window.map((file) => file.fileId));
+    if (!existing.ok) return err({ code: "INDEXING_FATAL", message: existing.error.message });
+    const existingById = new Map(existing.value.map((file) => [file.fileId, file]));
+    const priorIds = window
+      .filter((file) => {
+        const record = existingById.get(file.fileId);
+        return (
+          file.readStatus === "ready" &&
+          Boolean(file.fingerprint.contentHash) &&
+          !isCompatible(this.#config, file, record)
+        );
+      })
+      .map((file) => file.fileId);
+    const prior = await this.#dependencies.store.getReusableChunksForFiles(priorIds);
+    if (!prior.ok) return err({ code: "INDEXING_FATAL", message: prior.error.message });
+    const priorByFile = new Map<string, ReusableChunkRecord[]>();
+    for (const chunk of prior.value) {
+      const values = priorByFile.get(chunk.fileId) ?? [];
+      values.push(chunk);
+      priorByFile.set(chunk.fileId, values);
+    }
+    const files = await Promise.all(
+      window.map((file) =>
+        this.#prepareFile(
+          file,
+          existingById.get(file.fileId),
+          priorByFile.get(file.fileId) ?? [],
+          progress,
+          signal,
+        ),
+      ),
+    );
+    let chunks = 0;
+    for (const file of files) {
+      if (file.kind === "content") {
+        chunks += file.chunks.length;
+        progress.totalChunks += file.chunks.length;
+      }
+    }
+    return ok({ index, files, preparedFiles: files.length, preparedChunks: chunks });
   }
 
   async #prepareFile(
     file: DiscoveredFile,
     existing: IndexedFileRecord | undefined,
-    priorChunks: readonly IndexedChunkRecord[],
+    priorChunks: readonly ReusableChunkRecord[],
     progress: MutableProgress,
+    signal: AbortSignal,
   ): Promise<PreparedFile> {
     progress.currentFile = file.relativePath;
     if (file.readStatus !== "ready" || !file.fingerprint.contentHash) {
@@ -418,115 +818,147 @@ export class RepositoryIndexingService implements IndexingService {
         kind: "metadata",
         file,
         record: metadataRecord(existing, file, this.#now()),
-        chunks: priorChunks,
       };
     }
 
     progress.phase = "extracting";
     this.#publish(progress);
-    const extraction = await this.#dependencies.extraction.process(file);
+    const extraction = await this.#dependencies.extraction.process(file, { signal });
     if (!extraction.ok) return { kind: "failed", file, issue: extraction.error };
-    const reusable = new Map(
-      priorChunks
-        .filter(
-          (chunk) =>
-            chunk.vector.length === this.#config.embedding.vectorDimension &&
-            chunk.extractorVersion === this.#config.index.extractorVersion &&
-            chunk.chunkerVersion === this.#config.index.chunkerVersion,
-        )
-        .map((chunk) => [`${chunk.chunkId}\0${chunk.contentHash}`, chunk.vector] as const),
-    );
-    const missing = extraction.value.chunks.filter(
-      (chunk) => !reusable.has(`${chunk.chunkId}\0${chunk.contentHash}`),
-    );
-    return { kind: "content", file, extracted: extraction.value, reusable, missing };
+    const chunks = extraction.value.chunks.map((chunk) => ({
+      chunk,
+      embeddingInputHash: embeddingInputHash(this.#dependencies, chunk),
+    }));
+    const reusableByInput = new Map<string, ReusableChunkRecord[]>();
+    for (const candidate of priorChunks) {
+      if (!reusableCompatibility(this.#config, candidate)) continue;
+      const values = reusableByInput.get(candidate.embeddingInputHash) ?? [];
+      values.push(candidate);
+      reusableByInput.set(candidate.embeddingInputHash, values);
+    }
+    for (const values of reusableByInput.values()) {
+      values.sort((left, right) => left.chunkId.localeCompare(right.chunkId));
+    }
+    const reusable = new Map<string, EmbeddingVector>();
+    const missing: PreparedChunk[] = [];
+    for (const prepared of chunks) {
+      const candidates = reusableByInput.get(prepared.embeddingInputHash);
+      const candidate = candidates?.shift();
+      if (candidate) reusable.set(prepared.chunk.chunkId, candidate.vector);
+      else missing.push(prepared);
+    }
+    return { kind: "content", file, extracted: extraction.value, chunks, reusable, missing };
   }
 
   async #embedWindow(
-    prepared: readonly PreparedFile[],
+    prepared: PreparedWindow,
     progress: MutableProgress,
-    signal?: AbortSignal,
-  ): Promise<Result<readonly EmbeddedFile[], IndexingError>> {
-    const content = prepared.filter(
+    timing: MutableTiming,
+    signal: AbortSignal,
+  ): Promise<Result<EmbeddedWindow, IndexingError>> {
+    const content = prepared.files.filter(
       (item): item is Extract<PreparedFile, { readonly kind: "content" }> =>
         item.kind === "content",
     );
     const missing = content.flatMap((item) => item.missing);
-    if (missing.length === 0) return ok(content.map((item) => ({ prepared: item, vectors: [] })));
+    const reusedCount = content.reduce((sum, item) => sum + item.reusable.size, 0);
+    const vectorBytes =
+      (missing.length + reusedCount) *
+      this.#config.embedding.vectorDimension *
+      Float32Array.BYTES_PER_ELEMENT;
+    if (missing.length === 0) {
+      return ok({
+        prepared,
+        files: content.map((item) => ({ prepared: item, vectors: [] })),
+        vectorBytes,
+      });
+    }
     progress.phase = "embedding";
     this.#publish(progress);
-    const onBatch = () => {
+    const onBatch = (_completed: number, _total: number, metric?: EmbeddingBatchMetric) => {
       progress.batchesCompleted += 1;
+      if (metric) {
+        timing.embeddingUtilization.usefulTokens += metric.usefulTokens;
+        timing.embeddingUtilization.paddedTokens += metric.paddedTokens;
+        timing.embeddingUtilization.inferenceMs += metric.inferenceMs;
+        timing.embeddingUtilization.batches += 1;
+        timing.stageWaitMs.embedding += metric.queueWaitMs;
+      }
       this.#publish(progress);
     };
     const result = await this.#dependencies.embeddings.embedDocuments(
-      missing.map((chunk) => chunk.searchText),
+      missing.map((item) => item.chunk.searchText),
       {
-        ...(signal ? { signal } : {}),
+        signal,
         onBatch,
-        tokenCounts: missing.map((chunk) => chunk.tokenCount),
+        tokenCounts: missing.map((item) => item.chunk.tokenCount),
       },
     );
     if (result.ok) {
       progress.embeddedChunks += result.value.length;
       let cursor = 0;
-      return ok(
-        content.map((item) => {
+      return ok({
+        prepared,
+        vectorBytes,
+        files: content.map((item) => {
           const vectors = result.value.slice(cursor, cursor + item.missing.length);
           cursor += item.missing.length;
           return { prepared: item, vectors };
         }),
-      );
+      });
     }
     if (result.error.code === "EMBEDDING_CANCELLED") return this.#cancelError();
 
-    // A failed corpus-wide batch is retried file-by-file so one malformed input cannot poison
-    // otherwise healthy files. This slow path is used only after an inference failure.
     const isolated: EmbeddedFile[] = [];
     for (const item of content) {
+      if (signal.aborted) return this.#cancelError();
       if (item.missing.length === 0) {
         isolated.push({ prepared: item, vectors: [] });
         continue;
       }
       const retry = await this.#dependencies.embeddings.embedDocuments(
-        item.missing.map((chunk) => chunk.searchText),
+        item.missing.map((chunk) => chunk.chunk.searchText),
         {
-          ...(signal ? { signal } : {}),
+          signal,
           onBatch,
-          tokenCounts: item.missing.map((chunk) => chunk.tokenCount),
+          tokenCounts: item.missing.map((chunk) => chunk.chunk.tokenCount),
         },
       );
       if (!retry.ok && retry.error.code === "EMBEDDING_CANCELLED") return this.#cancelError();
       if (retry.ok) {
         progress.embeddedChunks += retry.value.length;
         isolated.push({ prepared: item, vectors: retry.value });
-      } else {
-        isolated.push({ prepared: item, error: retry.error });
-      }
+      } else isolated.push({ prepared: item, error: retry.error });
     }
-    return ok(isolated);
+    return ok({ prepared, files: isolated, vectorBytes });
   }
 
   async #commitWindow(
-    prepared: readonly PreparedFile[],
-    embedded: readonly EmbeddedFile[],
+    window: EmbeddedWindow,
     progress: MutableProgress,
     startedAt: number,
+    signal: AbortSignal,
   ): Promise<boolean> {
     let searchDataChanged = false;
-    const embeddedByFile = new Map(embedded.map((item) => [item.prepared.file.fileId, item]));
+    const embeddedByFile = new Map(window.files.map((item) => [item.prepared.file.fileId, item]));
+    const metadata: Array<Extract<PreparedFile, { readonly kind: "metadata" }>> = [];
     const entries: Array<{
       readonly file: IndexedFileRecord;
       readonly chunks: readonly IndexedChunkRecord[];
-      readonly source: PreparedFile;
+      readonly source: Extract<PreparedFile, { readonly kind: "content" }>;
     }> = [];
 
-    for (const item of prepared) {
+    for (const item of window.prepared.files) {
       progress.currentFile = item.file.relativePath;
       if (item.kind === "unchanged") {
         progress.unchangedFiles += 1;
         continue;
       }
+      if (item.kind === "metadata") {
+        metadata.push(item);
+        continue;
+      }
+      if (signal.aborted) break;
       if (item.kind === "skipped") {
         progress.skippedFiles += 1;
         if (item.shouldStore) {
@@ -548,11 +980,6 @@ export class RepositoryIndexingService implements IndexingService {
         searchDataChanged ||= stored.ok;
         continue;
       }
-      if (item.kind === "metadata") {
-        entries.push({ file: item.record, chunks: item.chunks, source: item });
-        continue;
-      }
-
       const result = embeddedByFile.get(item.file.fileId);
       if (!result || result.error) {
         const issue = result?.error ?? {
@@ -570,20 +997,16 @@ export class RepositoryIndexingService implements IndexingService {
         continue;
       }
       const newVectors = new Map(
-        item.missing.map((chunk, index) => [chunk.chunkId, result.vectors?.[index]] as const),
+        item.missing.map((chunk, index) => [chunk.chunk.chunkId, result.vectors?.[index]] as const),
       );
       const records: IndexedChunkRecord[] = [];
-      let invalid = false;
-      for (const chunk of item.extracted.chunks) {
-        const reused = item.reusable.get(`${chunk.chunkId}\0${chunk.contentHash}`);
-        const vector = reused ?? newVectors.get(chunk.chunkId);
-        if (!vector) {
-          invalid = true;
-          break;
-        }
+      for (const chunk of item.chunks) {
+        const vector =
+          item.reusable.get(chunk.chunk.chunkId) ?? newVectors.get(chunk.chunk.chunkId);
+        if (!vector) break;
         records.push(chunkRecord(this.#config, item.file, chunk, vector));
       }
-      if (invalid) {
+      if (records.length !== item.chunks.length) {
         const issue = {
           code: "INFERENCE_FAILED",
           message: "An embedding result was missing for a prepared chunk.",
@@ -605,7 +1028,19 @@ export class RepositoryIndexingService implements IndexingService {
       });
     }
 
-    if (entries.length > 0) {
+    if (!signal.aborted && metadata.length > 0) {
+      progress.phase = "committing";
+      this.#publish(progress);
+      const updated = await this.#dependencies.store.updateFiles(
+        metadata.map((item) => item.record),
+      );
+      if (!updated.ok) {
+        for (const item of metadata) {
+          this.#recordError(progress, item.file.fileId, item.file.relativePath, updated.error);
+        }
+      } else progress.unchangedFiles += metadata.length;
+    }
+    if (!signal.aborted && entries.length > 0) {
       progress.phase = "committing";
       this.#publish(progress);
       const committed = await this.#dependencies.store.replaceFiles(entries);
@@ -620,37 +1055,19 @@ export class RepositoryIndexingService implements IndexingService {
         }
       } else {
         for (const entry of entries) {
-          if (entry.source.kind === "metadata") progress.unchangedFiles += 1;
-          if (entry.source.kind === "content") {
-            progress.reusedChunks += entry.source.extracted.chunks.filter((chunk) =>
-              entry.source.kind === "content"
-                ? entry.source.reusable.has(`${chunk.chunkId}\0${chunk.contentHash}`)
-                : false,
-            ).length;
-            progress.committedChunks += entry.chunks.length;
-            searchDataChanged = true;
-          }
+          progress.reusedChunks += entry.source.reusable.size;
+          progress.committedChunks += entry.chunks.length;
         }
+        searchDataChanged = true;
       }
     }
-    for (const item of prepared) {
-      progress.currentFile = item.file.relativePath;
-      this.#processed(progress, startedAt);
+    if (!signal.aborted) {
+      for (const item of window.prepared.files) {
+        progress.currentFile = item.file.relativePath;
+        this.#processed(progress, startedAt);
+      }
     }
     return searchDataChanged;
-  }
-
-  async #timed<T>(
-    timing: MutableTiming,
-    stage: TimingStage,
-    operation: () => Promise<T>,
-  ): Promise<T> {
-    const started = this.#clock();
-    try {
-      return await operation();
-    } finally {
-      timing[stage] += this.#clock() - started;
-    }
   }
 
   #recordError(
@@ -663,12 +1080,11 @@ export class RepositoryIndexingService implements IndexingService {
     progress.errors.push({ fileId, relativePath, code: issue.code, message: issue.message });
   }
 
-  #cancelled(signal: AbortSignal | undefined, progress: MutableProgress): boolean {
-    if (!signal?.aborted) return false;
+  #cancel(progress: MutableProgress): Result<never, IndexingError> {
     progress.phase = "cancelled";
     delete progress.currentFile;
     this.#publish(progress);
-    return true;
+    return this.#cancelError();
   }
 
   #cancelError(): Result<never, IndexingError> {
@@ -687,9 +1103,9 @@ export class RepositoryIndexingService implements IndexingService {
       return;
     }
     const now = this.#now();
-    const elapsed = Math.max(0, now - startedAt);
+    const elapsedMs = Math.max(0, now - startedAt);
     const remaining =
-      (elapsed / progress.processedFiles) * (progress.totalFiles - progress.processedFiles);
+      (elapsedMs / progress.processedFiles) * (progress.totalFiles - progress.processedFiles);
     progress.estimatedCompletionMs = now + Math.round(remaining);
   }
 

@@ -6,6 +6,7 @@ import { type EmbeddingModelProfile, embeddingConfigFromProfile } from "../confi
 import type { EmbeddingVectorBatch, EmbeddingWorkerConfig } from "./embedding-protocol.ts";
 import {
   acceleratorTokenBucket,
+  acceleratorTokenBuckets,
   createTransformersEmbeddingProvider,
   type EmbeddingWorkerBoundary,
   TransformersEmbeddingProvider,
@@ -40,6 +41,7 @@ const profile: EmbeddingModelProfile = {
       defaultDtype: "fp32",
       dtypes: ["fp32"],
       maximumBatchSize: 16,
+      maximumBatchTokens: 8192,
       shapePolicy: "dynamic",
       tokenBuckets: [],
       workerSessions: 2,
@@ -48,6 +50,7 @@ const profile: EmbeddingModelProfile = {
       defaultDtype: "fp16",
       dtypes: ["fp16"],
       maximumBatchSize: 16,
+      maximumBatchTokens: 8192,
       shapePolicy: "fixed-buckets",
       tokenBuckets: [64, 128, 256, 384, 512],
       workerSessions: 1,
@@ -333,6 +336,51 @@ describe("Transformers provider orchestration", () => {
     await provider.shutdown();
   });
 
+  test("derives long-context shapes and enforces a per-bucket padded-token budget", async () => {
+    const longBuckets = acceleratorTokenBuckets(8_192);
+    expect(longBuckets).toEqual([1_024, 2_048, 4_096, 6_144, 8_192]);
+    expect(acceleratorTokenBucket(600, 8_192, longBuckets)).toBe(1_024);
+    expect(acceleratorTokenBuckets(0)).toEqual([]);
+
+    const cache = join(fixture, "budgeted-models");
+    const worker = new RecordingWorker(cache);
+    const provider = new TransformersEmbeddingProvider(
+      { ...embedding, device: "webgpu", quantization: "fp16" },
+      cache,
+      { batchSize: 16, batchTokenBudget: 512, profile, worker },
+    );
+    expect((await provider.warmUp({ allowDownload: true })).ok).toBe(true);
+    const metrics: Array<{
+      readonly size: number;
+      readonly padded: number;
+      readonly useful: number;
+      readonly fill: number;
+    }> = [];
+    const texts = Array.from({ length: 18 }, (_, index) => `short-${index}`);
+    const result = await provider.embedDocuments(texts, {
+      tokenCounts: texts.map(() => 10),
+      onBatch: (_completed, _total, metric) => {
+        if (metric) {
+          metrics.push({
+            size: metric.batchSize,
+            padded: metric.paddedTokens,
+            useful: metric.usefulTokens,
+            fill: metric.fillRatio,
+          });
+        }
+      },
+    });
+    expect(result.ok && result.value).toHaveLength(18);
+    expect(worker.embeddedTexts.map((batch) => batch.length)).toEqual([8, 8, 2]);
+    expect(worker.embedMaximumTokens).toEqual([64, 64, 64]);
+    expect(metrics).toEqual([
+      { size: 8, padded: 512, useful: 80, fill: 0.15625 },
+      { size: 8, padded: 512, useful: 80, fill: 0.15625 },
+      { size: 2, padded: 128, useful: 20, fill: 0.15625 },
+    ]);
+    await provider.shutdown();
+  });
+
   test("runs document batches across a bounded pool of warm workers", async () => {
     const cache = join(fixture, "pooled-models");
     const state = { active: 0, maxActive: 0 };
@@ -425,14 +473,13 @@ describe("Transformers provider orchestration", () => {
     const first = provider.embedDocuments(["first"]);
     const cancelled = provider.embedDocuments(["cancelled"], { signal: controller.signal });
     controller.abort();
-    const rejected = await provider.embedDocuments(["overflow"]);
-    expect(rejected.ok).toBe(false);
-    if (!rejected.ok) expect(rejected.error.code).toBe("EMBEDDING_QUEUE_FULL");
+    const backpressured = provider.embedDocuments(["backpressured"]);
     const firstResult = await first;
     expect(firstResult.ok && Array.from(firstResult.value[0] ?? [])).toEqual([1, 0]);
     const cancelledResult = await cancelled;
     expect(cancelledResult.ok).toBe(false);
     if (!cancelledResult.ok) expect(cancelledResult.error.code).toBe("EMBEDDING_CANCELLED");
+    expect((await backpressured).ok).toBe(true);
 
     const batches: number[] = [];
     const batched = await provider.embedDocuments(["one", "two", "three"], {
@@ -569,7 +616,7 @@ describe("deterministic fake provider", () => {
       expect(query.value).toHaveLength(3);
       expect(
         Math.abs(Math.sqrt(query.value.reduce((sum, value) => sum + value * value, 0)) - 1),
-      ).toBeLessThan(1e-10);
+      ).toBeLessThan(1e-6);
     }
     await provider.shutdown();
     expect((await provider.embedDocuments(["late"])).ok).toBe(false);

@@ -61,7 +61,13 @@ describe("compatibility classification", () => {
 
   test.each([
     ["root", (value: IndexCompatibility) => ({ ...value, rootIdentity: "other" })],
-    ["schema", (value: IndexCompatibility) => ({ ...value, indexSchemaVersion: 2 })],
+    [
+      "schema",
+      (value: IndexCompatibility) => ({
+        ...value,
+        indexSchemaVersion: value.indexSchemaVersion + 1,
+      }),
+    ],
     [
       "model",
       (value: IndexCompatibility) => ({

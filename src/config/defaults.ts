@@ -278,5 +278,5 @@ export const DEFAULT_INDEX_CONFIG: IndexConfig = Object.freeze({
   chunkSizeTokens: 400,
   chunkerVersion: 2,
   extractorVersion: 1,
-  schemaVersion: 1,
+  schemaVersion: 2,
 });
