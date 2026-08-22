@@ -59,6 +59,8 @@ export async function runControlledEvaluation(
         fixtureRoot,
         "--model",
         embeddings.identity.modelId,
+        "--embedding-device",
+        embeddings.identity.device,
         "--quantization",
         embeddings.identity.quantization,
         "--vector-dimension",

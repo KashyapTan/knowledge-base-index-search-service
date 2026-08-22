@@ -1,10 +1,12 @@
 import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
 import { basename, dirname, join, resolve } from "node:path";
+import type { DataType } from "@huggingface/transformers";
 import {
   parseBenchmarkDefinition,
   renderBenchmarkMarkdown,
   runLargeRepositoryBenchmark,
 } from "../src/benchmark/index.ts";
+import type { EmbeddingDevice } from "../src/config/index.ts";
 import { BGE_MODEL_PROFILES } from "../src/indexing/index.ts";
 
 interface Cli {
@@ -15,6 +17,8 @@ interface Cli {
   readonly definition: string;
   readonly modelId: string;
   readonly vectorDimension: number;
+  readonly embeddingDevice: EmbeddingDevice;
+  readonly quantization: DataType;
   readonly judgments?: string;
   readonly allowDownload: boolean;
   readonly resume: boolean;
@@ -45,7 +49,9 @@ function parseCli(argv: readonly string[]): Cli {
     "--state-dir",
     "--cache-dir",
     "--definition",
+    "--embedding-device",
     "--model",
+    "--quantization",
     "--vector-dimension",
     "--judgments",
     "--allow-download",
@@ -67,6 +73,8 @@ function parseCli(argv: readonly string[]): Cli {
         resolve(import.meta.dir, "../benchmarks/large-repository-definition.json"),
     ),
     modelId,
+    embeddingDevice: (value(argv, "--embedding-device") ?? "cpu") as EmbeddingDevice,
+    quantization: (value(argv, "--quantization") ?? "q8") as DataType,
     vectorDimension,
     ...(value(argv, "--judgments")
       ? { judgments: resolve(value(argv, "--judgments") as string) }
@@ -92,8 +100,9 @@ const report = await runLargeRepositoryBenchmark({
   outputPath: cli.output,
   definition,
   modelId: cli.modelId,
+  embeddingDevice: cli.embeddingDevice,
   vectorDimension: cli.vectorDimension,
-  quantization: "q8",
+  quantization: cli.quantization,
   allowDownload: cli.allowDownload,
   ...(cli.judgments ? { judgmentsPath: cli.judgments } : {}),
 });

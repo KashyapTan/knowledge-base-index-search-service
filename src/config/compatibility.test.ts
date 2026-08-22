@@ -52,7 +52,7 @@ describe("compatibility classification", () => {
       "application version",
       (value: IndexCompatibility) => ({ ...value, applicationVersion: "1.0.0" }),
     ],
-    ["descriptor version", (value: IndexCompatibility) => ({ ...value, descriptorVersion: 2 })],
+    ["descriptor version", (value: IndexCompatibility) => ({ ...value, descriptorVersion: 3 })],
   ] as const)("requires migration for %s drift", (_name, mutate) => {
     expect(classifyIndexCompatibility(mutate(expected()), expected()).status).toBe(
       "migration-required",
@@ -67,6 +67,13 @@ describe("compatibility classification", () => {
       (value: IndexCompatibility) => ({
         ...value,
         embedding: { ...value.embedding, modelId: "other" },
+      }),
+    ],
+    [
+      "device",
+      (value: IndexCompatibility) => ({
+        ...value,
+        embedding: { ...value.embedding, device: "webgpu" as const },
       }),
     ],
     [
@@ -176,7 +183,7 @@ describe("persisted compatibility metadata", () => {
   test("accepts a structurally valid descriptor with a newer metadata version", async () => {
     const path = join(fixtureDir, "newer.json");
     await mkdir(join(fixtureDir, "unused"));
-    await writeFile(path, JSON.stringify({ ...expected(), descriptorVersion: 2 }));
+    await writeFile(path, JSON.stringify({ ...expected(), descriptorVersion: 3 }));
     const result = await readCompatibilityMetadata(path, expected());
     expect(result).toMatchObject({ ok: true, value: { status: "migration-required" } });
   });

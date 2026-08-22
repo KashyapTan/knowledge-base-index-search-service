@@ -46,6 +46,7 @@ function vectorFor(text: string): readonly number[] {
  */
 export class FixtureSemanticEmbeddingProvider implements EmbeddingProvider {
   readonly identity: EmbeddingIdentity = {
+    device: "cpu",
     modelId: "kbiss/controlled-semantic-fixture",
     quantization: "fp32",
     vectorDimension: DIMENSION,

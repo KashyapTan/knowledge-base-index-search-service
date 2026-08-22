@@ -17,6 +17,7 @@ interface AssetRecord {
 
 interface AssetManifest {
   readonly version: typeof ASSET_MANIFEST_VERSION;
+  readonly device?: string;
   readonly modelId: string;
   readonly quantization: string;
   readonly files: readonly AssetRecord[];
@@ -101,6 +102,7 @@ async function verifyManifest(
   identity: EmbeddingIdentity,
 ): Promise<Result<void, EmbeddingError>> {
   if (
+    (manifest.device ?? "cpu") !== identity.device ||
     manifest.modelId !== identity.modelId ||
     manifest.quantization !== identity.quantization ||
     manifest.files.length === 0
@@ -202,6 +204,7 @@ export async function verifyOrWriteModelAssetManifest(
     if (files.length === 0) return failure("No local model assets were found after model setup.");
     const manifest: AssetManifest = {
       version: ASSET_MANIFEST_VERSION,
+      device: identity.device,
       modelId: identity.modelId,
       quantization: identity.quantization,
       files,

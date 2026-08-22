@@ -63,6 +63,7 @@ export interface LargeRepositoryBenchmarkReport {
     readonly dependencies: Readonly<Record<string, string>>;
   };
   readonly settings: {
+    readonly embeddingDevice: string;
     readonly modelId: string;
     readonly quantization: string;
     readonly vectorDimension: number;

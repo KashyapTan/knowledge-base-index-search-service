@@ -195,3 +195,7 @@ The release gate should require:
   LanceDB commits raised measured real BGE-small throughput from the 31.76 chunks/s release baseline
   to 59.78 chunks/s on the same Xpdite revision. The expanded core gate now passes 363 tests plus the
   opt-in real-model smoke; detailed stage timings and comparison caveats are in the Plan 11 report.
+- Apple accelerator benchmark (2026-08-22): fresh matched Xpdite runs measured 54.52 chunks/s for
+  CPU/q8 and 94.13 chunks/s for WebGPU/fp16. Full indexing fell from 176.93 to 102.47 seconds and
+  peak RSS from 3.08 to 1.44 GiB, with zero failures and unchanged source Git status. Detailed stage,
+  query-latency, cache-size, and batch-sweep evidence is recorded in the Plan 11 report.

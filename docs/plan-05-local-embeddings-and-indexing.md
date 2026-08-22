@@ -21,34 +21,39 @@ the HTTP server, or the browser.
 
 ## Embedding provider and model assets
 
-`EmbeddingProvider` owns model identity, quantization, vector dimensions, the 512-token maximum,
-document/query encoding, L2 normalization, batching, warm-up, cancellation, and shutdown. BGE-small
-(`Xenova/bge-small-en-v1.5`, q8, 384 dimensions) remains the default. BGE-base has a centralized
+`EmbeddingProvider` owns model identity, execution device, precision, vector dimensions, the
+512-token maximum, document/query encoding, L2 normalization, batching, warm-up, cancellation, and
+shutdown. BGE-small (`Xenova/bge-small-en-v1.5`, 384 dimensions) remains the default. Apple Silicon
+uses WebGPU/fp16; other platforms retain CPU/q8. BGE-base has a centralized
 profile (`Xenova/bge-base-en-v1.5`, 768 dimensions), so Plan 11 can select it through configuration
 without model-specific indexer branches. BGE v1.5 inputs currently use no query instruction; Plan 11
 owns the corpus-specific decision to introduce one.
 
 Plan 10 operationalized this contract: `bun run model:setup` remains the explicit preparation path,
 and an online first `bun run serve` now also authorizes acquisition so the documented two-command
-teammate flow is complete. Both paths first attempt a local-only load. When acquisition is authorized
-and assets are absent, Transformers.js fetches only the configured Hugging Face model into
+teammate flow is complete. A verified manifest loads locally; a genuinely absent or quarantined
+cache goes directly through the pinned acquisition path, avoiding Transformers.js's failed-load
+memoization on an empty cache. Transformers.js fetches only the configured Hugging Face model into
 `ResolvedPaths.modelCacheDir`, then disables remote loading before inference. `--offline`,
 `KBISS_OFFLINE`, or config `offline:true` never opts into a download and returns an actionable
 `MODEL_ASSETS_MISSING`/`MODEL_ASSETS_INVALID` result. See the Plan 10 operations contract for retry,
 corrupt-cache quarantine, and verified air-gapped import behavior.
 
 After the first successful load, KBISS writes `kbiss-model-assets.json` in the model cache. It records
-the selected model/quantization plus size, modification time, and SHA-256 for every regular cached
+the selected model/device/precision plus size, modification time, and SHA-256 for every regular cached
 asset. Subsequent startups reject malformed, mismatched, missing, symlinked, resized, or changed
 assets. Hashing uses cheap metadata first and rehashes a file when its metadata changes.
 
-A bounded Bun Worker pool owns the Transformers.js pipelines and ONNX runtimes. Machines with at
-least eight logical CPUs use two warm inference workers; smaller machines retain one. The provider
+A bounded Bun Worker pool owns the tokenizer, model, and ONNX runtimes. CPU profiles on machines
+with at least eight logical CPUs use two warm inference workers; smaller machines retain one.
+Accelerator profiles use one warm session so workers do not contend for the same GPU. The provider
 splits requests into 16-document batches, schedules at most one active batch per worker, preserves
-result order, and keeps a bounded queue of eight jobs. A full queue returns
+result order, and keeps a bounded queue of eight jobs. Accelerator document inputs use their exact
+chunk token counts to group work into fixed 64/128/256/384/512-token shapes before padding and
+inference, then restore vectors to source order. A full queue returns
 `EMBEDDING_QUEUE_FULL`. Aborted queued work never reaches inference; an active ONNX call is allowed
 to finish but its result is discarded. Shutdown rejects queued work, waits for active calls, sends
-typed Worker shutdown handshakes, disposes both pipelines, and terminates the Workers.
+typed Worker shutdown handshakes, disposes the models, and terminates the Workers.
 
 Production extraction uses a separate bounded pool: four tokenizer/extraction workers on machines
 with at least eight logical CPUs, two on machines with four to seven, and one below that. Every

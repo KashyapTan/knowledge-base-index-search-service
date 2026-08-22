@@ -13,9 +13,9 @@ import {
 } from "node:fs/promises";
 import { cpus, platform, release, totalmem } from "node:os";
 import { dirname, extname, isAbsolute, join, relative, resolve } from "node:path";
-import { AutoTokenizer } from "@huggingface/transformers";
+import { AutoTokenizer, type DataType } from "@huggingface/transformers";
 import * as lancedb from "@lancedb/lancedb";
-import type { AppConfig } from "../config/index.ts";
+import type { AppConfig, EmbeddingDevice } from "../config/index.ts";
 import { loadAppConfig } from "../config/index.ts";
 import {
   createDiscoveryService,
@@ -62,7 +62,8 @@ interface BenchmarkRunOptions {
   readonly definition: BenchmarkDefinition;
   readonly modelId: string;
   readonly vectorDimension: number;
-  readonly quantization: "q8";
+  readonly embeddingDevice: EmbeddingDevice;
+  readonly quantization: DataType;
   readonly allowDownload: boolean;
   readonly judgmentsPath?: string;
   readonly generatedAt?: string;
@@ -286,6 +287,8 @@ async function runIncrementalFixture(
         root,
         "--model",
         config.embedding.modelId,
+        "--embedding-device",
+        config.embedding.device,
         "--quantization",
         config.embedding.quantization,
         "--vector-dimension",
@@ -375,6 +378,8 @@ export async function runLargeRepositoryBenchmark(
       canonicalRoot,
       "--model",
       options.modelId,
+      "--embedding-device",
+      options.embeddingDevice,
       "--quantization",
       options.quantization,
       "--vector-dimension",
@@ -508,6 +513,7 @@ export async function runLargeRepositoryBenchmark(
         dependencies,
       },
       settings: {
+        embeddingDevice: config.embedding.device,
         modelId: config.embedding.modelId,
         quantization: config.embedding.quantization,
         vectorDimension: config.embedding.vectorDimension,

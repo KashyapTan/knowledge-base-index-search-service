@@ -32,7 +32,7 @@ const HELP = `KBISS operational commands
   bun run version                              Print application/runtime versions
 
 Configuration options: --root, --port, --config, --state-dir, --cache-dir, --model,
---quantization, --vector-dimension, --normalization, and --offline.
+--embedding-device, --quantization, --vector-dimension, --normalization, and --offline.
 
 Reset scope flags: --all-index-versions and --include-model. The default is only the current
 root/model/schema index. Destructive commands prompt on a TTY; automation must pass --yes.`;

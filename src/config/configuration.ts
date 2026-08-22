@@ -7,16 +7,19 @@ import { createIndexCompatibility } from "./compatibility.ts";
 import type {
   AppConfig,
   ConfigurationError,
+  ConfiguredEmbeddingDevice,
   EmbeddingConfig,
   IndexCompatibility,
 } from "./contracts.ts";
 import { LOOPBACK_HOST } from "./contracts.ts";
 import {
   DEFAULT_EMBEDDING_CONFIG,
+  DEFAULT_EMBEDDING_DEVICE,
   DEFAULT_IGNORE_PATTERNS,
   DEFAULT_INDEX_CONFIG,
   DEFAULT_PORT,
   DEFAULT_SOURCE_ROOT,
+  SUPPORTED_EMBEDDING_DEVICES,
   SUPPORTED_QUANTIZATIONS,
 } from "./defaults.ts";
 import {
@@ -29,6 +32,7 @@ import {
 
 interface RawConfig {
   readonly cacheDir?: string;
+  readonly embeddingDevice?: string;
   readonly ignorePatterns?: readonly string[];
   readonly modelId?: string;
   readonly normalization?: string;
@@ -45,6 +49,7 @@ interface CliConfig extends RawConfig {
 }
 
 export interface LoadAppConfigOptions {
+  readonly architecture?: NodeJS.Architecture;
   readonly argv?: readonly string[];
   readonly cwd?: string;
   readonly env?: Readonly<Record<string, string | undefined>>;
@@ -56,6 +61,7 @@ export interface LoadAppConfigOptions {
 const cliOptions = {
   "--cache-dir": "cacheDir",
   "--config": "configFile",
+  "--embedding-device": "embeddingDevice",
   "--model": "modelId",
   "--normalization": "normalization",
   "--offline": "offline",
@@ -108,6 +114,7 @@ function environmentConfig(env: Readonly<Record<string, string | undefined>>): C
   return {
     ...(env.KBISS_CACHE_DIR ? { cacheDir: env.KBISS_CACHE_DIR } : {}),
     ...(env.KBISS_CONFIG_FILE ? { configFile: env.KBISS_CONFIG_FILE } : {}),
+    ...(env.KBISS_EMBEDDING_DEVICE ? { embeddingDevice: env.KBISS_EMBEDDING_DEVICE } : {}),
     ...(env.KBISS_MODEL_ID ? { modelId: env.KBISS_MODEL_ID } : {}),
     ...(env.KBISS_NORMALIZATION ? { normalization: env.KBISS_NORMALIZATION } : {}),
     ...(env.KBISS_OFFLINE ? { offline: env.KBISS_OFFLINE } : {}),
@@ -121,6 +128,7 @@ function environmentConfig(env: Readonly<Record<string, string | undefined>>): C
 
 const allowedConfigKeys = new Set<keyof RawConfig>([
   "cacheDir",
+  "embeddingDevice",
   "ignorePatterns",
   "modelId",
   "normalization",
@@ -300,10 +308,12 @@ export async function loadAppConfig(
   const env = options.env ?? process.env;
   const cwd = options.cwd ?? process.cwd();
   const homeDir = options.homeDir ?? homedir();
+  const architecture = options.architecture ?? process.arch;
+  const platform = options.platform ?? process.platform;
   const platformDirectories = resolvePlatformDirectories({
     env,
     homeDir,
-    ...(options.platform ? { platform: options.platform } : {}),
+    platform,
   });
   if (!platformDirectories.ok) return platformDirectories;
 
@@ -323,6 +333,11 @@ export async function loadAppConfig(
       environment.cacheDir ??
       file.value.cacheDir ??
       platformDirectories.value.cacheDir,
+    embeddingDevice:
+      cli.value.embeddingDevice ??
+      environment.embeddingDevice ??
+      file.value.embeddingDevice ??
+      DEFAULT_EMBEDDING_DEVICE,
     modelId:
       cli.value.modelId ??
       environment.modelId ??
@@ -336,11 +351,7 @@ export async function loadAppConfig(
       DEFAULT_EMBEDDING_CONFIG.normalization,
     offline: cli.value.offline ?? environment.offline ?? file.value.offline ?? false,
     port: cli.value.port ?? environment.port ?? file.value.port ?? DEFAULT_PORT,
-    quantization:
-      cli.value.quantization ??
-      environment.quantization ??
-      file.value.quantization ??
-      DEFAULT_EMBEDDING_CONFIG.quantization,
+    quantization: cli.value.quantization ?? environment.quantization ?? file.value.quantization,
     root: cli.value.root ?? environment.root ?? file.value.root ?? DEFAULT_SOURCE_ROOT,
     stateDir:
       cli.value.stateDir ??
@@ -363,7 +374,25 @@ export async function loadAppConfig(
   if (!vectorDimension.ok) return vectorDimension;
   const modelId = nonEmpty(merged.modelId, "modelId");
   if (!modelId.ok) return modelId;
-  const quantization = nonEmpty(merged.quantization, "quantization");
+  const requestedDevice = nonEmpty(merged.embeddingDevice, "embeddingDevice");
+  if (!requestedDevice.ok) return requestedDevice;
+  if (!SUPPORTED_EMBEDDING_DEVICES.has(requestedDevice.value as ConfiguredEmbeddingDevice)) {
+    return err({
+      code: "CONFIG_VALUE_INVALID",
+      message: "embeddingDevice must be auto, cpu, coreml, or webgpu.",
+      details: { setting: "embeddingDevice" },
+    });
+  }
+  const device =
+    requestedDevice.value === "auto"
+      ? platform === "darwin" && architecture === "arm64"
+        ? "webgpu"
+        : "cpu"
+      : (requestedDevice.value as EmbeddingConfig["device"]);
+  const quantization = nonEmpty(
+    merged.quantization ?? (device === "webgpu" ? "fp16" : DEFAULT_EMBEDDING_CONFIG.quantization),
+    "quantization",
+  );
   if (!quantization.ok) return quantization;
   if (!SUPPORTED_QUANTIZATIONS.has(quantization.value as DataType)) {
     return err({
@@ -388,6 +417,7 @@ export async function loadAppConfig(
   if (!sourceRoot.ok) return sourceRoot;
   const rootIdentity = createRootIdentity(sourceRoot.value);
   const embedding: EmbeddingConfig = {
+    device,
     modelId: modelId.value,
     normalization: "l2",
     quantization: quantization.value as DataType,

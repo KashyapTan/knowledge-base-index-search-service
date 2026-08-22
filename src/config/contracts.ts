@@ -3,6 +3,9 @@ import type { AppError } from "../shared/result.ts";
 
 export const LOOPBACK_HOST = "127.0.0.1" as const;
 
+export type EmbeddingDevice = "cpu" | "coreml" | "webgpu";
+export type ConfiguredEmbeddingDevice = EmbeddingDevice | "auto";
+
 export interface SourceRoot {
   /** A stable, opaque identity derived from the canonical path. */
   readonly identity: string;
@@ -11,6 +14,7 @@ export interface SourceRoot {
 }
 
 export interface EmbeddingConfig {
+  readonly device: EmbeddingDevice;
   readonly modelId: string;
   readonly normalization: "l2";
   readonly quantization: DataType;

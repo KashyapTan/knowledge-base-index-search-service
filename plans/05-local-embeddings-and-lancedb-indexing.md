@@ -111,3 +111,6 @@ Plan 06 builds retrieval and ranking over the persisted file/chunk schema and qu
   Worker pools, 64-file corpus-wide embedding windows, bulk prior-chunk reads, and one serialized
   batched LanceDB writer. The chunks-first/file-marker recovery invariant remains unchanged. Stage
   timings and measured throughput evidence are recorded in the Plan 5 and Plan 11 documentation.
+- Apple accelerator revision (2026-08-22): macOS arm64 now uses one warm WebGPU/fp16 model with
+  fixed token-length buckets while retaining all preparation, backpressure, resumability, reuse, and
+  serialized database-write behavior. CPU/q8 remains an explicit cross-platform fallback.

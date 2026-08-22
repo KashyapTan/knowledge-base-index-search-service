@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { EmbeddingWorkerConfig } from "./embedding-protocol.ts";
 import {
+  acceleratorTokenBucket,
   createTransformersEmbeddingProvider,
   type EmbeddingWorkerBoundary,
   TransformersEmbeddingProvider,
@@ -28,6 +29,7 @@ afterEach(async () => {
 });
 
 const embedding = {
+  device: "cpu" as const,
   modelId: "kbiss/fake-model",
   normalization: "l2" as const,
   quantization: "fp32" as const,
@@ -36,6 +38,7 @@ const embedding = {
 
 describe("model asset integrity", () => {
   const identity = {
+    device: embedding.device,
     modelId: embedding.modelId,
     quantization: embedding.quantization,
     vectorDimension: embedding.vectorDimension,
@@ -49,6 +52,7 @@ describe("model asset integrity", () => {
     const asset = join(cache, "model", "weights.onnx");
     await writeFile(asset, "weights-one");
     const identity = {
+      device: embedding.device,
       modelId: embedding.modelId,
       quantization: embedding.quantization,
       vectorDimension: embedding.vectorDimension,
@@ -91,6 +95,7 @@ describe("model asset integrity", () => {
     await writeFile(asset, "same bytes");
     await writeFile(outside, "same bytes");
     const identity = {
+      device: embedding.device,
       modelId: embedding.modelId,
       quantization: embedding.quantization,
       vectorDimension: embedding.vectorDimension,
@@ -163,6 +168,7 @@ describe("model asset integrity", () => {
 
 class RecordingWorker implements EmbeddingWorkerBoundary {
   readonly configs: EmbeddingWorkerConfig[] = [];
+  readonly embedMaximumTokens: Array<number | undefined> = [];
   readonly #cache: string;
   readonly #failLocal: boolean;
   closeCalls = 0;
@@ -186,7 +192,11 @@ class RecordingWorker implements EmbeddingWorkerBoundary {
     await writeFile(join(this.#cache, "weights.bin"), "local weights");
   }
 
-  async embed(texts: readonly string[]): Promise<readonly (readonly number[])[]> {
+  async embed(
+    texts: readonly string[],
+    maximumTokens?: number,
+  ): Promise<readonly (readonly number[])[]> {
+    this.embedMaximumTokens.push(maximumTokens);
     return texts.map(() => [1, 0]);
   }
 
@@ -226,6 +236,42 @@ class ConcurrentWorker implements EmbeddingWorkerBoundary {
 }
 
 describe("Transformers provider orchestration", () => {
+  test("uses fixed accelerator token buckets and restores original vector order", async () => {
+    expect([1, 64, 65, 384, 385, 900].map((count) => acceleratorTokenBucket(count, 512))).toEqual([
+      64, 64, 128, 384, 512, 512,
+    ]);
+    const cache = join(fixture, "bucketed-models");
+    const worker = new RecordingWorker(cache);
+    worker.embed = async (texts, maximumTokens) => {
+      worker.embedMaximumTokens.push(maximumTokens);
+      return texts.map((text) =>
+        text === "short" ? [1, 0] : text === "medium" ? [0, 1] : [-1, 0],
+      );
+    };
+    const provider = new TransformersEmbeddingProvider(
+      { ...embedding, device: "webgpu", quantization: "fp16" },
+      cache,
+      { batchSize: 16, worker },
+    );
+    expect((await provider.warmUp({ allowDownload: true })).ok).toBe(true);
+    expect(
+      await provider.embedDocuments(["long", "short", "medium"], {
+        tokenCounts: [300, 10, 70],
+      }),
+    ).toEqual({
+      ok: true,
+      value: [
+        [-1, 0],
+        [1, 0],
+        [0, 1],
+      ],
+    });
+    expect(worker.embedMaximumTokens).toEqual([64, 128, 384]);
+    const invalid = await provider.embedDocuments(["one", "two"], { tokenCounts: [1] });
+    expect(invalid).toMatchObject({ ok: false, error: { code: "INFERENCE_FAILED" } });
+    await provider.shutdown();
+  });
+
   test("runs document batches across a bounded pool of warm workers", async () => {
     const cache = join(fixture, "pooled-models");
     const state = { active: 0, maxActive: 0 };
@@ -239,8 +285,8 @@ describe("Transformers provider orchestration", () => {
         return worker;
       },
     });
-    expect(await provider.warmUp()).toEqual({ ok: true, value: undefined });
-    expect(await provider.warmUp()).toEqual({ ok: true, value: undefined });
+    expect(await provider.warmUp({ allowDownload: true })).toEqual({ ok: true, value: undefined });
+    expect(await provider.warmUp({ allowDownload: true })).toEqual({ ok: true, value: undefined });
     const result = await provider.embedDocuments(["one", "two", "three", "four"]);
     expect(result.ok && result.value).toHaveLength(4);
     expect(state.maxActive).toBe(2);
@@ -264,11 +310,11 @@ describe("Transformers provider orchestration", () => {
         onProgress: (phase) => phases.push(phase),
       }),
     ).toEqual({ ok: true, value: undefined });
-    expect(phases).toEqual(["verifying", "recovering", "loading-local", "downloading", "ready"]);
+    expect(phases).toEqual(["verifying", "recovering", "downloading", "ready"]);
     expect(
       (await readdir(fixture)).some((name) => name.startsWith("recover-models.corrupt-")),
     ).toBe(true);
-    expect(worker.configs.map((entry) => entry.localFilesOnly)).toEqual([true, false]);
+    expect(worker.configs.map((entry) => entry.localFilesOnly)).toEqual([false]);
     await provider.shutdown();
   });
 
@@ -279,14 +325,14 @@ describe("Transformers provider orchestration", () => {
     const unavailable = await missing.warmUp();
     expect(unavailable.ok).toBe(false);
     if (!unavailable.ok) expect(unavailable.error.code).toBe("MODEL_ASSETS_MISSING");
-    expect(missingWorker.configs.map((config) => config.localFilesOnly)).toEqual([true]);
+    expect(missingWorker.configs).toEqual([]);
     await missing.shutdown();
 
     const setupCache = join(fixture, "setup-models");
     const setupWorker = new RecordingWorker(setupCache, true);
     const setup = new TransformersEmbeddingProvider(embedding, setupCache, { worker: setupWorker });
     expect(await setup.warmUp({ allowDownload: true })).toEqual({ ok: true, value: undefined });
-    expect(setupWorker.configs.map((config) => config.localFilesOnly)).toEqual([true, false]);
+    expect(setupWorker.configs.map((config) => config.localFilesOnly)).toEqual([false]);
     expect(await Bun.file(join(setupCache, "kbiss-model-assets.json")).exists()).toBe(true);
     await setup.shutdown();
   });
@@ -303,7 +349,7 @@ describe("Transformers provider orchestration", () => {
       batchSize: 1,
       maxQueue: 2,
     });
-    expect(await provider.warmUp()).toEqual({ ok: true, value: undefined });
+    expect(await provider.warmUp({ allowDownload: true })).toEqual({ ok: true, value: undefined });
 
     const controller = new AbortController();
     const first = provider.embedDocuments(["first"]);
@@ -335,7 +381,7 @@ describe("Transformers provider orchestration", () => {
     const worker = new RecordingWorker(cache);
     worker.embed = async () => [[1, 1, 1]];
     const provider = new TransformersEmbeddingProvider(embedding, cache, { worker });
-    expect((await provider.warmUp()).ok).toBe(true);
+    expect((await provider.warmUp({ allowDownload: true })).ok).toBe(true);
     const dimensions = await provider.embedDocuments(["bad"]);
     expect(dimensions.ok).toBe(false);
     if (!dimensions.ok) expect(dimensions.error.code).toBe("VECTOR_DIMENSION_INVALID");
@@ -401,6 +447,7 @@ describe("Transformers provider orchestration", () => {
     });
     await expect(
       crashing.initialize({
+        device: embedding.device,
         modelId: embedding.modelId,
         dtype: embedding.quantization,
         expectedDimension: 2,

@@ -9,11 +9,13 @@ the Plan 6 ranking contract or Plan 9 rendering/security contract.
 production assets, starts loopback HTTP before long initialization, opens the browser exactly once,
 then verifies/loads the configured model and reconciles the index in the background.
 
-The pinned default remains `Xenova/bge-small-en-v1.5`, q8, 384 dimensions. Warm-up first inspects the
-local integrity manifest and attempts local-only loading. If assets are absent and offline mode is
-false, only this pinned model may be downloaded, with two launch attempts (three through explicit
-`model:setup`). After setup, an integrity manifest covers every regular asset by size, mtime, and
-SHA-256. Normal local loading sets Transformers.js `local_files_only`.
+The pinned default remains `Xenova/bge-small-en-v1.5`, 384 dimensions. Apple Silicon resolves the
+automatic execution profile to WebGPU/fp16; other platforms retain CPU/q8, and either may be
+selected explicitly. Warm-up first inspects the local integrity manifest. Verified assets load
+local-only; absent assets go directly to the pinned download path when offline mode is false, with
+two launch attempts (three through explicit `model:setup`). After setup, an integrity manifest
+covers every regular asset by size, mtime, and SHA-256. Normal loading sets Transformers.js
+`local_files_only`.
 
 A corrupt manifest/cache is never overwritten in place. Online recovery renames it to a unique
 `.corrupt-*` sibling before acquiring a fresh cache. `--offline`, `KBISS_OFFLINE`, or config

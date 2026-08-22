@@ -85,6 +85,7 @@ async function main(): Promise<void> {
     console.info("✓ Bun.serve returned the compiled Vite entry asset");
 
     const initialization = worker.initialize({
+      device: "cpu",
       modelId: PROVISIONAL_EMBEDDING_MODEL.id,
       dtype: PROVISIONAL_EMBEDDING_MODEL.dtype,
       expectedDimension: PROVISIONAL_EMBEDDING_MODEL.dimension,

@@ -7,6 +7,7 @@ import type {
   CompatibilityAssessment,
   CompatibilityError,
   EmbeddingConfig,
+  EmbeddingDevice,
   IndexCompatibility,
   IndexConfig,
 } from "./contracts.ts";
@@ -66,6 +67,8 @@ function parseCompatibility(value: unknown): IndexCompatibility | undefined {
     embedding.normalization !== "l2" ||
     typeof embedding.quantization !== "string" ||
     !SUPPORTED_QUANTIZATIONS.has(embedding.quantization as DataType) ||
+    (embedding.device !== undefined &&
+      !["cpu", "coreml", "webgpu"].includes(String(embedding.device))) ||
     !isPositiveInteger(embedding.vectorDimension) ||
     !chunking ||
     !isNonNegativeInteger(chunking.overlapTokens) ||
@@ -75,7 +78,14 @@ function parseCompatibility(value: unknown): IndexCompatibility | undefined {
   ) {
     return undefined;
   }
-  return value as IndexCompatibility;
+  return {
+    ...(value as IndexCompatibility),
+    embedding: {
+      ...(embedding as unknown as EmbeddingConfig),
+      // Descriptors written before v2 always used the CPU execution provider.
+      device: (embedding.device ?? "cpu") as EmbeddingDevice,
+    },
+  };
 }
 
 function equalIndexInputs(left: IndexCompatibility, right: IndexCompatibility): string[] {
@@ -85,6 +95,8 @@ function equalIndexInputs(left: IndexCompatibility, right: IndexCompatibility): 
     differences.push("index schema changed");
   if (left.embedding.modelId !== right.embedding.modelId)
     differences.push("embedding model changed");
+  if (left.embedding.device !== right.embedding.device)
+    differences.push("embedding execution device changed");
   if (left.embedding.quantization !== right.embedding.quantization)
     differences.push("embedding quantization changed");
   if (left.embedding.vectorDimension !== right.embedding.vectorDimension)

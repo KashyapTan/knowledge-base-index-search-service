@@ -22,20 +22,38 @@ export const BGE_MODEL_PROFILES = Object.freeze({
 
 export interface EmbeddingWorkerBoundary {
   initialize(config: {
+    readonly device: EmbeddingConfig["device"];
     readonly modelId: string;
     readonly dtype: EmbeddingConfig["quantization"];
     readonly expectedDimension: number;
     readonly cacheDir: string;
     readonly localFilesOnly: boolean;
   }): Promise<void>;
-  embed(texts: readonly string[]): Promise<readonly (readonly number[])[]>;
+  embed(texts: readonly string[], maximumTokens?: number): Promise<readonly (readonly number[])[]>;
   close(): Promise<void>;
 }
 
 interface QueueJob {
   readonly texts: readonly string[];
+  readonly maximumTokens?: number;
   readonly signal?: AbortSignal;
   readonly resolve: (result: Result<readonly (readonly number[])[], EmbeddingError>) => void;
+}
+
+interface EmbeddingBatch {
+  readonly texts: readonly string[];
+  readonly indices: readonly number[];
+  readonly maximumTokens?: number;
+}
+
+export const ACCELERATOR_TOKEN_BUCKETS = Object.freeze([64, 128, 256, 384, 512] as const);
+
+export function acceleratorTokenBucket(tokenCount: number, maximumTokens: number): number {
+  return (
+    ACCELERATOR_TOKEN_BUCKETS.find(
+      (candidate) => candidate >= tokenCount && candidate <= maximumTokens,
+    ) ?? maximumTokens
+  );
 }
 
 function embeddingFailure(code: EmbeddingError["code"], message: string): EmbeddingError {
@@ -85,6 +103,7 @@ export class TransformersEmbeddingProvider implements EmbeddingProvider {
   ) {
     const profile = BGE_MODEL_PROFILES[embedding.modelId as keyof typeof BGE_MODEL_PROFILES];
     this.identity = {
+      device: embedding.device,
       modelId: embedding.modelId,
       quantization: embedding.quantization,
       vectorDimension: embedding.vectorDimension,
@@ -122,6 +141,7 @@ export class TransformersEmbeddingProvider implements EmbeddingProvider {
     const progress = options.onProgress ?? (() => undefined);
     progress("verifying", "Verifying local model assets.");
     const inspection = await inspectModelAssets(this.#cacheDir, this.identity);
+    let downloadRequired = inspection.state === "missing";
     if (inspection.state === "corrupt") {
       if (!options.allowDownload || !options.recoverCorruptAssets) {
         return err(embeddingFailure("MODEL_ASSETS_INVALID", inspection.message));
@@ -129,20 +149,9 @@ export class TransformersEmbeddingProvider implements EmbeddingProvider {
       progress("recovering", "Preserving the corrupt cache before reacquiring model assets.");
       const quarantined = await quarantineModelCache(this.#cacheDir);
       if (!quarantined.ok) return quarantined;
+      downloadRequired = true;
     }
-    try {
-      progress("loading-local", "Loading the model from the local cache.");
-      await this.#workers[0]?.initialize({
-        modelId: this.identity.modelId,
-        dtype: this.identity.quantization,
-        expectedDimension: this.identity.vectorDimension,
-        cacheDir: this.#cacheDir,
-        localFilesOnly: true,
-      });
-    } catch (error) {
-      if (!(error instanceof EmbeddingWorkerError) || error.code !== "MODEL_ASSETS_MISSING") {
-        return err(mapWorkerError(error));
-      }
+    if (downloadRequired) {
       if (!options.allowDownload) {
         return err(
           embeddingFailure(
@@ -160,6 +169,7 @@ export class TransformersEmbeddingProvider implements EmbeddingProvider {
         );
         try {
           await this.#workers[0]?.initialize({
+            device: this.identity.device,
             modelId: this.identity.modelId,
             dtype: this.identity.quantization,
             expectedDimension: this.identity.vectorDimension,
@@ -173,11 +183,26 @@ export class TransformersEmbeddingProvider implements EmbeddingProvider {
         }
       }
       if (downloadError) return err(mapWorkerError(downloadError));
+    } else {
+      try {
+        progress("loading-local", "Loading the model from the local cache.");
+        await this.#workers[0]?.initialize({
+          device: this.identity.device,
+          modelId: this.identity.modelId,
+          dtype: this.identity.quantization,
+          expectedDimension: this.identity.vectorDimension,
+          cacheDir: this.#cacheDir,
+          localFilesOnly: true,
+        });
+      } catch (error) {
+        return err(mapWorkerError(error));
+      }
     }
     try {
       await Promise.all(
         this.#workers.slice(1).map((worker) =>
           worker.initialize({
+            device: this.identity.device,
             modelId: this.identity.modelId,
             dtype: this.identity.quantization,
             expectedDimension: this.identity.vectorDimension,
@@ -215,16 +240,17 @@ export class TransformersEmbeddingProvider implements EmbeddingProvider {
     if (options.signal?.aborted)
       return err(embeddingFailure("EMBEDDING_CANCELLED", "Embedding was cancelled."));
     if (texts.length === 0) return ok([]);
-
-    const batches: string[][] = [];
-    for (let offset = 0; offset < texts.length; offset += this.batchSize) {
-      batches.push(
-        texts.slice(offset, offset + this.batchSize).map((text) => this.encodeDocument(text)),
+    if (options.tokenCounts && options.tokenCounts.length !== texts.length) {
+      return err(
+        embeddingFailure(
+          "INFERENCE_FAILED",
+          "Embedding token counts must align one-to-one with the input texts.",
+        ),
       );
     }
-    const batchVectors: Array<readonly (readonly number[])[] | undefined> = new Array(
-      batches.length,
-    );
+
+    const batches = this.#createBatches(texts, options.tokenCounts);
+    const vectors: Array<readonly number[] | undefined> = new Array(texts.length);
     let nextBatch = 0;
     let completed = 0;
     let firstError: EmbeddingError | undefined;
@@ -234,12 +260,15 @@ export class TransformersEmbeddingProvider implements EmbeddingProvider {
         nextBatch += 1;
         const batch = batches[index];
         if (!batch) return;
-        const result = await this.#enqueue(batch, options.signal);
+        const result = await this.#enqueue(batch.texts, batch.maximumTokens, options.signal);
         if (!result.ok) {
           firstError ??= result.error;
           return;
         }
-        batchVectors[index] = result.value;
+        for (const [vectorIndex, vector] of result.value.entries()) {
+          const inputIndex = batch.indices[vectorIndex];
+          if (inputIndex !== undefined) vectors[inputIndex] = vector;
+        }
         completed += 1;
         options.onBatch?.(completed, batches.length);
       }
@@ -248,7 +277,10 @@ export class TransformersEmbeddingProvider implements EmbeddingProvider {
       Array.from({ length: Math.min(this.#workers.length, batches.length) }, () => run()),
     );
     if (firstError) return err(firstError);
-    return ok(batchVectors.flatMap((vectors) => vectors ?? []));
+    if (vectors.some((vector) => !vector)) {
+      return err(embeddingFailure("INFERENCE_FAILED", "An embedding result was not returned."));
+    }
+    return ok(vectors as readonly (readonly number[])[]);
   }
 
   async embedQuery(
@@ -270,6 +302,7 @@ export class TransformersEmbeddingProvider implements EmbeddingProvider {
 
   #enqueue(
     texts: readonly string[],
+    maximumTokens?: number,
     signal?: AbortSignal,
   ): Promise<Result<readonly (readonly number[])[], EmbeddingError>> {
     if (this.#queue.length + this.#activeWorkers.size >= this.#maxQueue) {
@@ -278,7 +311,12 @@ export class TransformersEmbeddingProvider implements EmbeddingProvider {
       );
     }
     return new Promise((resolve) => {
-      this.#queue.push({ texts, ...(signal ? { signal } : {}), resolve });
+      this.#queue.push({
+        texts,
+        ...(maximumTokens ? { maximumTokens } : {}),
+        ...(signal ? { signal } : {}),
+        resolve,
+      });
       void this.#pump();
     });
   }
@@ -296,7 +334,7 @@ export class TransformersEmbeddingProvider implements EmbeddingProvider {
       job.resolve(err(embeddingFailure("EMBEDDING_CANCELLED", "Embedding was cancelled.")));
     } else {
       try {
-        const vectors = await worker.embed(job.texts);
+        const vectors = await worker.embed(job.texts, job.maximumTokens);
         if (job.signal?.aborted) {
           job.resolve(err(embeddingFailure("EMBEDDING_CANCELLED", "Embedding was cancelled.")));
         } else {
@@ -314,6 +352,48 @@ export class TransformersEmbeddingProvider implements EmbeddingProvider {
     } else {
       void this.#pump();
     }
+  }
+
+  #createBatches(texts: readonly string[], tokenCounts?: readonly number[]): EmbeddingBatch[] {
+    const encoded = texts.map((text, index) => ({
+      index,
+      text: this.encodeDocument(text),
+      tokenCount: tokenCounts?.[index],
+    }));
+    if (this.identity.device === "cpu" || !tokenCounts) {
+      const batches: EmbeddingBatch[] = [];
+      for (let offset = 0; offset < encoded.length; offset += this.batchSize) {
+        const inputs = encoded.slice(offset, offset + this.batchSize);
+        batches.push({
+          indices: inputs.map((input) => input.index),
+          texts: inputs.map((input) => input.text),
+        });
+      }
+      return batches;
+    }
+
+    const byBucket = new Map<number, typeof encoded>();
+    for (const input of encoded) {
+      const bucket = acceleratorTokenBucket(
+        input.tokenCount ?? this.identity.maximumTokens,
+        this.identity.maximumTokens,
+      );
+      const grouped = byBucket.get(bucket) ?? [];
+      grouped.push(input);
+      byBucket.set(bucket, grouped);
+    }
+    const batches: EmbeddingBatch[] = [];
+    for (const [maximumTokens, inputs] of [...byBucket].sort(([left], [right]) => left - right)) {
+      for (let offset = 0; offset < inputs.length; offset += this.batchSize) {
+        const batch = inputs.slice(offset, offset + this.batchSize);
+        batches.push({
+          indices: batch.map((input) => input.index),
+          maximumTokens,
+          texts: batch.map((input) => input.text),
+        });
+      }
+    }
+    return batches;
   }
 
   async #performShutdown(): Promise<void> {
@@ -363,7 +443,8 @@ export function createTransformersEmbeddingProvider(
   config: AppConfig,
   options?: ConstructorParameters<typeof TransformersEmbeddingProvider>[2],
 ): TransformersEmbeddingProvider {
-  const workerCount = availableParallelism() >= 8 ? 2 : 1;
+  // Multiple CPU sessions improve throughput; multiple GPU sessions only contend for one device.
+  const workerCount = config.embedding.device === "cpu" && availableParallelism() >= 8 ? 2 : 1;
   return new TransformersEmbeddingProvider(config.embedding, config.paths.modelCacheDir, {
     workerCount,
     ...options,

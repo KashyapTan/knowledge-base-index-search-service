@@ -1,5 +1,6 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
+import type { DataType } from "@huggingface/transformers";
 import {
   compareModelBenchmarks,
   parseBenchmarkDefinition,
@@ -8,6 +9,7 @@ import {
   runLargeRepositoryBenchmark,
   validateBenchmarkPaths,
 } from "../src/benchmark/index.ts";
+import type { EmbeddingDevice } from "../src/config/index.ts";
 
 function required(argv: readonly string[], name: string): string {
   const index = argv.indexOf(name);
@@ -35,12 +37,16 @@ const definitionPath = resolve(
 const judgments = optional(argv, "--judgments");
 const cacheDir = resolve(optional(argv, "--cache-dir") ?? join(outputDir, "model-cache"));
 const allowDownload = argv.includes("--allow-download");
+const embeddingDevice = (optional(argv, "--embedding-device") ?? "cpu") as EmbeddingDevice;
+const quantization = (optional(argv, "--quantization") ?? "q8") as DataType;
 const known = new Set([
   "--root",
   "--output-dir",
   "--definition",
   "--judgments",
   "--cache-dir",
+  "--embedding-device",
+  "--quantization",
   "--allow-download",
 ]);
 for (let index = 0; index < argv.length; index += 1) {
@@ -63,7 +69,8 @@ const shared = {
   root,
   cacheDir,
   definition,
-  quantization: "q8" as const,
+  embeddingDevice,
+  quantization,
   allowDownload,
   generatedAt,
   ...(judgments ? { judgmentsPath: resolve(judgments) } : {}),

@@ -70,10 +70,12 @@ committing corpus-derived paths/content. Both models ranked exact filename, exac
 symbol first. BGE base fixed no important small-model miss, introduced an additional important miss,
 and regressed Recall@10/MRR.
 
-Decision: retain quantized `Xenova/bge-small-en-v1.5`, 384 dimensions, instruction-free BGE v1.5
+Baseline model-size decision: retain `Xenova/bge-small-en-v1.5` rather than BGE base, 384 dimensions,
+instruction-free BGE v1.5
 query/document encoding, 400/50 chunking, existing RRF/path boosts, and exact vector search below
-50,000 chunks. The model/dimension/quantization remain compatibility metadata, so a future base or
-other-model index cannot overwrite the selected small index.
+50,000 chunks. This phase used q8/CPU; the later Apple accelerator section supersedes that execution
+default without changing the selected model. Model/device/precision/dimension remain compatibility
+metadata, so incompatible vectors cannot overwrite the selected small index.
 
 Known relevance limitation: exact metadata behavior is strong, but conceptual/synonym recall on this
 code-heavy corpus remains modest. Base does not solve it. Future work should revise human judgments
@@ -118,6 +120,37 @@ Batch-size trials retained 16: batch 32 improved the 512-chunk sample only about
 64 regressed and required more memory. Embedding inference remains the dominant cost, so a Rust file
 parser rewrite is not supported by this evidence; future backend work should target measured model
 inference throughput.
+
+### Apple WebGPU/fp16 revision (2026-08-22)
+
+The embedding worker now loads the tokenizer and `AutoModel` directly. On macOS arm64 the automatic
+profile selects one warm WebGPU fp16 session and groups document batches into fixed
+64/128/256/384/512-token shapes; non-Apple and explicit fallback profiles retain the two-worker q8
+CPU path. Device and precision are index/model compatibility inputs, so the two vector sets cannot
+be mixed.
+
+Fresh, read-only, apples-to-apples runs used the same Xpdite revision, 586 ready files, 9,646 chunks,
+current ignore definition, and exact vector strategy. Both completed with zero failures and
+unchanged Git status:
+
+| Measurement | CPU/q8 | WebGPU/fp16 | Change |
+| --- | ---: | ---: | ---: |
+| Full index wall time | 176.93 s | 102.47 s | 42.1% lower |
+| Throughput | 54.52 chunks/s | 94.13 chunks/s | 72.7% higher |
+| Embedding stage | 152.58 s | 78.87 s | 48.3% lower |
+| Preparation stage | 23.85 s | 23.15 s | comparable |
+| Peak RSS | 3.08 GB | 1.44 GB | 53.2% lower |
+| Model cache | 34.7 MB | 67.5 MB | 32.7 MB larger |
+| Mean warm query-embedding p50 | 1.36 ms | 10.66 ms | 9.30 ms slower |
+
+WebGPU's query overhead raised mean total-query p50 from 57.08 ms to 66.20 ms, which remains below
+the release threshold and is accepted in exchange for the rebuild gain. A controlled 512-document,
+384-token sweep retained batch size 16 at 124.6 chunks/s; batch 32 reached 119.2 chunks/s, while
+batch 64 exhibited severe memory/dispatch pressure and was terminated. A separate fixed-shape raw
+probe reached about 134 chunks/s, supporting the bucketing implementation. Core ML was not selected:
+the existing q8 graph exceeded 90 seconds on one long batch, and its fp16 artifact failed ONNX
+Runtime Core ML graph initialization on this machine. WebGPU therefore provides the verified
+accelerated path without a second language/runtime.
 
 ## Security and release status
 

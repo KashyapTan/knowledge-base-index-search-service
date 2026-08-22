@@ -127,3 +127,7 @@ Plan 03 consumes `AppConfig`, `ResolvedPaths`, and startup-state reporting to di
   function coverage for loaded application code.
 - Full contracts, paths, configuration keys, classification rules, and Plan 3 guidance are recorded
   in `docs/plan-02-runtime-configuration.md`.
+- Post-plan accelerator revision (2026-08-22): configuration now resolves `embeddingDevice:auto` to
+  WebGPU/fp16 on macOS arm64 and CPU/q8 elsewhere. The concrete device is part of model/index
+  namespaces and compatibility metadata; legacy descriptors are interpreted as CPU before
+  classification so upgrades trigger a controlled rebuild rather than a corrupt-state failure.

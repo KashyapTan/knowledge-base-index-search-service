@@ -1,9 +1,11 @@
 import type { DataType } from "@huggingface/transformers";
+import type { EmbeddingDevice } from "../config/index.ts";
 import type { DiscoveredFile, FileChange } from "../discovery/index.ts";
 import type { ExtractedFile, ExtractionPipeline, SearchChunk } from "../extraction/index.ts";
 import type { AppError, Result } from "../shared/result.ts";
 
 export interface EmbeddingIdentity {
+  readonly device: EmbeddingDevice;
   readonly modelId: string;
   readonly quantization: DataType;
   readonly vectorDimension: number;
@@ -13,6 +15,8 @@ export interface EmbeddingIdentity {
 
 export interface EmbedOptions {
   readonly signal?: AbortSignal;
+  /** Exact tokenizer counts let accelerator backends build homogeneous fixed-shape batches. */
+  readonly tokenCounts?: readonly number[];
   readonly onBatch?: (completed: number, total: number) => void;
 }
 

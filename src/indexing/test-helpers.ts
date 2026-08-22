@@ -13,6 +13,7 @@ export function indexingConfig(
   dimension = 4,
 ): AppConfig {
   const embedding = {
+    device: "cpu" as const,
     modelId: "kbiss/deterministic-fake",
     normalization: "l2" as const,
     quantization: "fp32" as const,
@@ -45,7 +46,7 @@ export function indexingConfig(
         sizeTokens: DEFAULT_INDEX_CONFIG.chunkSizeTokens,
         version: DEFAULT_INDEX_CONFIG.chunkerVersion,
       },
-      descriptorVersion: 1,
+      descriptorVersion: 2,
       embedding,
       extractorVersion: DEFAULT_INDEX_CONFIG.extractorVersion,
       indexSchemaVersion: DEFAULT_INDEX_CONFIG.schemaVersion,

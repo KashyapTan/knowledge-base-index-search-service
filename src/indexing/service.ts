@@ -460,7 +460,11 @@ export class RepositoryIndexingService implements IndexingService {
     };
     const result = await this.#dependencies.embeddings.embedDocuments(
       missing.map((chunk) => chunk.searchText),
-      { ...(signal ? { signal } : {}), onBatch },
+      {
+        ...(signal ? { signal } : {}),
+        onBatch,
+        tokenCounts: missing.map((chunk) => chunk.tokenCount),
+      },
     );
     if (result.ok) {
       progress.embeddedChunks += result.value.length;
@@ -485,7 +489,11 @@ export class RepositoryIndexingService implements IndexingService {
       }
       const retry = await this.#dependencies.embeddings.embedDocuments(
         item.missing.map((chunk) => chunk.searchText),
-        { ...(signal ? { signal } : {}), onBatch },
+        {
+          ...(signal ? { signal } : {}),
+          onBatch,
+          tokenCounts: item.missing.map((chunk) => chunk.tokenCount),
+        },
       );
       if (!retry.ok && retry.error.code === "EMBEDDING_CANCELLED") return this.#cancelError();
       if (retry.ok) {

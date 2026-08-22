@@ -1,5 +1,6 @@
 import type { DataType } from "@huggingface/transformers";
 import { DEFAULT_EMBEDDING_CONFIG } from "../config/defaults.ts";
+import type { EmbeddingDevice } from "../config/index.ts";
 
 export const PROVISIONAL_EMBEDDING_MODEL = {
   id: DEFAULT_EMBEDDING_CONFIG.modelId,
@@ -10,6 +11,7 @@ export const PROVISIONAL_EMBEDDING_MODEL = {
 } as const;
 
 export interface EmbeddingWorkerConfig {
+  readonly device: EmbeddingDevice;
   readonly modelId: string;
   readonly dtype: DataType;
   readonly expectedDimension: number;
@@ -28,6 +30,7 @@ export type EmbeddingWorkerRequest =
       readonly kind: "embed";
       readonly requestId: string;
       readonly texts: readonly string[];
+      readonly maximumTokens?: number;
     }
   | {
       readonly kind: "shutdown";

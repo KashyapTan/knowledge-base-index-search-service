@@ -41,6 +41,7 @@ export class FakeEmbeddingProvider implements EmbeddingProvider {
 
   constructor(options: FakeEmbeddingProviderOptions = {}) {
     this.identity = {
+      device: "cpu",
       modelId: "kbiss/deterministic-fake",
       quantization: "fp32",
       vectorDimension: options.dimension ?? 4,

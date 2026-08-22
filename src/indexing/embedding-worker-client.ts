@@ -54,11 +54,15 @@ export class EmbeddingWorkerClient {
     this.#expectKind(response, "ready");
   }
 
-  async embed(texts: readonly string[]): Promise<readonly (readonly number[])[]> {
+  async embed(
+    texts: readonly string[],
+    maximumTokens?: number,
+  ): Promise<readonly (readonly number[])[]> {
     const response = await this.#request({
       kind: "embed",
       requestId: crypto.randomUUID(),
       texts,
+      ...(maximumTokens ? { maximumTokens } : {}),
     });
     this.#expectKind(response, "embeddings");
     return response.vectors;

@@ -12,6 +12,7 @@ const localCache = Bun.env.KBISS_MODEL_CACHE_DIR;
     }
     const provider = new TransformersEmbeddingProvider(
       {
+        device: "cpu",
         modelId: "Xenova/bge-small-en-v1.5",
         normalization: "l2",
         quantization: "q8",

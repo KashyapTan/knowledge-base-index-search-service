@@ -40,6 +40,7 @@ function report(
       dependencies: {},
     },
     settings: {
+      embeddingDevice: "cpu",
       modelId,
       quantization: "q8",
       vectorDimension: dimension,

@@ -1,4 +1,12 @@
-import { env, type FeatureExtractionPipeline, pipeline } from "@huggingface/transformers";
+import {
+  AutoModel,
+  AutoTokenizer,
+  env,
+  mean_pooling,
+  type PreTrainedModel,
+  type PreTrainedTokenizer,
+  type Tensor,
+} from "@huggingface/transformers";
 import type {
   EmbeddingWorkerConfig,
   EmbeddingWorkerRequest,
@@ -7,7 +15,8 @@ import type {
 
 declare const self: Worker;
 
-let extractor: FeatureExtractionPipeline | undefined;
+let model: PreTrainedModel | undefined;
+let tokenizer: PreTrainedTokenizer | undefined;
 let activeConfig: EmbeddingWorkerConfig | undefined;
 
 function post(response: EmbeddingWorkerResponse): void {
@@ -22,16 +31,26 @@ async function initialize(
   request: Extract<EmbeddingWorkerRequest, { kind: "initialize" }>,
 ): Promise<void> {
   try {
-    if (extractor) await extractor.dispose();
-    extractor = undefined;
+    if (model) await model.dispose();
+    model = undefined;
+    tokenizer = undefined;
     activeConfig = undefined;
-    env.allowLocalModels = true;
+    // During setup, go straight to the pinned Hub artifact instead of probing an unrelated
+    // node_modules/models path. Normal inference remains strictly local.
+    env.allowLocalModels = request.config.localFilesOnly;
     env.allowRemoteModels = !request.config.localFilesOnly;
     env.cacheDir = request.config.cacheDir;
-    extractor = await pipeline("feature-extraction", request.config.modelId, {
+    const common = {
       cache_dir: request.config.cacheDir,
-      dtype: request.config.dtype,
       local_files_only: request.config.localFilesOnly,
+    } as const;
+    // Transformers.js shares cache metadata between these loaders. Serial acquisition avoids a
+    // first-run race in which both loaders try to populate the same missing config file.
+    tokenizer = await AutoTokenizer.from_pretrained(request.config.modelId, common);
+    model = await AutoModel.from_pretrained(request.config.modelId, {
+      ...common,
+      device: request.config.device,
+      dtype: request.config.dtype,
     });
     // Inference never needs the network, including after an explicit setup download.
     env.allowRemoteModels = false;
@@ -42,16 +61,14 @@ async function initialize(
     post({
       kind: "error",
       requestId: request.requestId,
-      code: request.config.localFilesOnly ? "MODEL_ASSETS_MISSING" : "MODEL_LOAD_FAILED",
-      message: request.config.localFilesOnly
-        ? "The configured model assets are not available in the local model cache. Run model setup before indexing."
-        : errorMessage(error),
+      code: "MODEL_LOAD_FAILED",
+      message: `The configured ${request.config.dtype} model could not be loaded on ${request.config.device}. ${errorMessage(error)}`,
     });
   }
 }
 
 async function embed(request: Extract<EmbeddingWorkerRequest, { kind: "embed" }>): Promise<void> {
-  if (!extractor || !activeConfig) {
+  if (!model || !tokenizer || !activeConfig) {
     post({
       kind: "error",
       requestId: request.requestId,
@@ -72,15 +89,27 @@ async function embed(request: Extract<EmbeddingWorkerRequest, { kind: "embed" }>
   }
 
   try {
-    const output = await extractor([...request.texts], { pooling: "mean", normalize: true });
-    const dimension = output.dims.at(-1);
+    const modelInputs = tokenizer([...request.texts], {
+      padding: request.maximumTokens ? "max_length" : true,
+      truncation: true,
+      ...(request.maximumTokens ? { max_length: request.maximumTokens } : {}),
+    });
+    const output = (await model(modelInputs)) as {
+      readonly last_hidden_state?: Tensor;
+      readonly logits?: Tensor;
+      readonly token_embeddings?: Tensor;
+    };
+    const hidden = output.last_hidden_state ?? output.logits ?? output.token_embeddings;
+    if (!hidden) throw new Error("The embedding model did not return token embeddings.");
+    const pooled = mean_pooling(hidden, modelInputs.attention_mask).normalize(2, -1);
+    const dimension = pooled.dims.at(-1);
     if (dimension !== activeConfig.expectedDimension) {
       throw new Error(
         `Expected ${activeConfig.expectedDimension} embedding values, received ${String(dimension)}.`,
       );
     }
 
-    const flatValues = Array.from(output.data, Number);
+    const flatValues = Array.from(pooled.data, Number);
     const vectors = request.texts.map((_, index) => {
       const start = index * dimension;
       return flatValues.slice(start, start + dimension);
@@ -108,8 +137,9 @@ self.onmessage = (event: MessageEvent<EmbeddingWorkerRequest>) => {
       break;
     case "shutdown":
       void (async () => {
-        if (extractor) await extractor.dispose();
-        extractor = undefined;
+        if (model) await model.dispose();
+        model = undefined;
+        tokenizer = undefined;
         activeConfig = undefined;
         env.allowRemoteModels = false;
         post({ kind: "stopped", requestId: request.requestId });

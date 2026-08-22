@@ -12,7 +12,9 @@ export type {
   CompatibilityError,
   CompatibilityStatus,
   ConfigurationError,
+  ConfiguredEmbeddingDevice,
   EmbeddingConfig,
+  EmbeddingDevice,
   IndexCompatibility,
   IndexConfig,
   ResolvedPaths,
@@ -27,10 +29,12 @@ export {
   APPLICATION_NAME,
   APPLICATION_VERSION,
   DEFAULT_EMBEDDING_CONFIG,
+  DEFAULT_EMBEDDING_DEVICE,
   DEFAULT_IGNORE_PATTERNS,
   DEFAULT_INDEX_CONFIG,
   DEFAULT_PORT,
   DEFAULT_SOURCE_ROOT,
+  SUPPORTED_EMBEDDING_DEVICES,
   SUPPORTED_QUANTIZATIONS,
 } from "./defaults.ts";
 export {

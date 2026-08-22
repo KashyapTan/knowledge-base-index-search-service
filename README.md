@@ -35,16 +35,19 @@ changes until interrupted. The page is available during model loading and indexi
 searchable as committed data is ready. Stop with Ctrl-C; KBISS checkpoints safe work and shuts down
 the watcher, worker pools, LanceDB, and HTTP server.
 
-Initial indexing is a bounded local pipeline. Larger machines use four file extraction/tokenization
-workers and two warm ONNX embedding workers. Changed files are prepared in 64-file windows, missing
-chunks are batched across file boundaries, and one serialized writer applies each complete window to
-LanceDB before advancing its file commit markers. This keeps the UI responsive, avoids concurrent
-database races, bounds memory, and preserves interruption-safe resume semantics.
+Initial indexing is a bounded local pipeline. Apple Silicon uses four file extraction/tokenization
+workers and one warm fp16 WebGPU embedding worker; CPU fallback uses up to two warm q8 ONNX workers.
+Changed files are prepared in 64-file windows, missing chunks are batched across file boundaries,
+and accelerator batches are grouped into fixed 64/128/256/384/512-token shapes. One serialized
+writer applies each complete window to LanceDB before advancing its file commit markers. This keeps
+the UI responsive, avoids concurrent database races, bounds memory, and preserves interruption-safe
+resume semantics.
 
 The first online run may take several minutes while it downloads and verifies
-`Xenova/bge-small-en-v1.5` q8. Download failure is retried twice. Later launches verify the cache and
-load with remote access disabled. A corrupt cache is preserved beside the managed cache before a
-fresh copy is acquired.
+`Xenova/bge-small-en-v1.5`. Apple Silicon selects WebGPU/fp16; other platforms retain CPU/q8, and
+either profile can be selected explicitly. Download failure is retried twice. Later launches verify
+the cache and load with remote access disabled. A corrupt cache is preserved beside the managed
+cache before a fresh copy is acquired.
 
 Override the root or preferred port for one launch:
 
@@ -99,7 +102,9 @@ inference.
 
 Precedence is command-line options, `KBISS_*` environment variables, the per-user `config.json`,
 then defaults. Supported options are `--root`, `--port`, `--config`, `--state-dir`, `--cache-dir`,
-`--model`, `--quantization`, `--vector-dimension`, `--normalization`, and `--offline`.
+`--model`, `--embedding-device`, `--quantization`, `--vector-dimension`, `--normalization`, and
+`--offline`. `--embedding-device` accepts `auto`, `cpu`, `webgpu`, or `coreml`; `auto` resolves to
+WebGPU on Apple Silicon and CPU elsewhere.
 
 Every source root uses a conservative cross-language ignore list for dependency trees, virtual
 environments, build output, caches, test reports, user-specific editor/VCS state, local version

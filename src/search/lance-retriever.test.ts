@@ -21,6 +21,7 @@ let fixture = "";
 
 class QueryFixtureEmbeddingProvider implements EmbeddingProvider {
   readonly identity: EmbeddingIdentity = {
+    device: "cpu",
     modelId: "kbiss/search-fixture",
     quantization: "fp32",
     vectorDimension: 4,

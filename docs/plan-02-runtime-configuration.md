@@ -20,7 +20,8 @@ The sources map as follows:
 | Source root | `--root` | `KBISS_ROOT` | `root` | `~/dev/card-gateway-artifacts` |
 | Preferred port | `--port` | `KBISS_PORT` | `port` | `3210` |
 | Model ID | `--model` | `KBISS_MODEL_ID` | `modelId` | `Xenova/bge-small-en-v1.5` |
-| Quantization | `--quantization` | `KBISS_QUANTIZATION` | `quantization` | `q8` |
+| Embedding device | `--embedding-device` | `KBISS_EMBEDDING_DEVICE` | `embeddingDevice` | `auto` |
+| Quantization | `--quantization` | `KBISS_QUANTIZATION` | `quantization` | Apple Silicon `fp16`; otherwise `q8` |
 | Vector dimensions | `--vector-dimension` | `KBISS_VECTOR_DIMENSION` | `vectorDimension` | `384` |
 | Normalization | `--normalization` | `KBISS_NORMALIZATION` | `normalization` | `l2` |
 | Offline model policy | `--offline[=true|false]` | `KBISS_OFFLINE` | `offline` | `false` |
@@ -34,6 +35,11 @@ exist and contain a JSON object with only documented keys. A missing default con
 Unknown CLI options, unknown JSON keys, unsupported quantization values, non-positive vector
 dimensions, non-`l2` normalization, and ports outside 1-65535 produce structured display-safe
 errors. The loader does not mutate its arguments or environment.
+
+`embeddingDevice:auto` resolves to `webgpu` on macOS arm64 and `cpu` elsewhere. When quantization
+is not explicitly configured, WebGPU selects `fp16` and CPU selects `q8`. The resolved concrete
+device and dtype—not `auto`—are persisted in model/index namespaces and compatibility metadata, so
+vectors from different execution profiles are never mixed.
 
 The config file defaults are:
 
@@ -50,7 +56,8 @@ Example:
   "root": "~/dev/card-gateway-artifacts",
   "port": 3210,
   "modelId": "Xenova/bge-small-en-v1.5",
-  "quantization": "q8",
+  "embeddingDevice": "webgpu",
+  "quantization": "fp16",
   "vectorDimension": 384,
   "ignorePatterns": ["node_modules/", ".venv/", "dist/", "build/"]
 }
@@ -106,7 +113,7 @@ State/cache paths inside either repository are rejected.
 
 - descriptor and application versions;
 - index schema version;
-- embedding model ID, quantization, vector dimension, and `l2` normalization;
+- embedding model ID, execution device, quantization, vector dimension, and `l2` normalization;
 - extractor and chunker versions;
 - chunk-size and overlap policy;
 - opaque canonical-root identity.

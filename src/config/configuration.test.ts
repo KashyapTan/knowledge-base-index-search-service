@@ -39,9 +39,23 @@ function externalPaths(name: string): { cacheDir: string; stateDir: string } {
 
 describe("command-line parsing", () => {
   test("accepts separated and equals-style values", () => {
-    expect(parseCliOptions(["--root", "repo", "--port=4111", "--model", "local/model"])).toEqual({
+    expect(
+      parseCliOptions([
+        "--root",
+        "repo",
+        "--port=4111",
+        "--model",
+        "local/model",
+        "--embedding-device=webgpu",
+      ]),
+    ).toEqual({
       ok: true,
-      value: { root: "repo", port: "4111", modelId: "local/model" },
+      value: {
+        root: "repo",
+        port: "4111",
+        modelId: "local/model",
+        embeddingDevice: "webgpu",
+      },
     });
   });
 
@@ -136,13 +150,21 @@ describe("configuration precedence and validation", () => {
       "--model=cli/model",
     ]);
 
-    const result = await loadAppConfig({ argv, env, homeDir: fixtureDir, projectDir });
+    const result = await loadAppConfig({
+      architecture: "arm64",
+      argv,
+      env,
+      homeDir: fixtureDir,
+      platform: "darwin",
+      projectDir,
+    });
 
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.value.sourceRoots[0].path).toBe(cliRoot);
     expect(result.value.server).toEqual({ hostname: "127.0.0.1", port: 4003 });
     expect(result.value.embedding).toEqual({
+      device: "webgpu",
       modelId: "cli/model",
       normalization: "l2",
       quantization: "q4",
@@ -176,6 +198,43 @@ describe("configuration precedence and validation", () => {
     expect(result.value.server.port).toBe(4100);
     expect(result.value.embedding.vectorDimension).toBe(384);
     expect(result.value.ignorePatterns).toEqual(DEFAULT_IGNORE_PATTERNS);
+  });
+
+  test("selects fp16 WebGPU on Apple Silicon and retains q8 CPU elsewhere", async () => {
+    const root = await makeRoot("device-default-root");
+    const appleLocations = externalPaths("device-apple");
+    const apple = await loadAppConfig({
+      architecture: "arm64",
+      argv: ["--root", root],
+      env: {
+        KBISS_STATE_DIR: appleLocations.stateDir,
+        KBISS_CACHE_DIR: appleLocations.cacheDir,
+      },
+      homeDir: fixtureDir,
+      platform: "darwin",
+      projectDir,
+    });
+    expect(apple.ok && apple.value.embedding).toEqual({
+      device: "webgpu",
+      modelId: "Xenova/bge-small-en-v1.5",
+      normalization: "l2",
+      quantization: "fp16",
+      vectorDimension: 384,
+    });
+
+    const linuxLocations = externalPaths("device-linux");
+    const linux = await loadAppConfig({
+      architecture: "x64",
+      argv: ["--root", root],
+      env: {
+        KBISS_STATE_DIR: linuxLocations.stateDir,
+        KBISS_CACHE_DIR: linuxLocations.cacheDir,
+      },
+      homeDir: fixtureDir,
+      platform: "linux",
+      projectDir,
+    });
+    expect(linux.ok && linux.value.embedding).toMatchObject({ device: "cpu", quantization: "q8" });
   });
 
   test("lets the user configuration replace or remove every default ignore pattern", async () => {
@@ -287,6 +346,7 @@ describe("configuration precedence and validation", () => {
     [["--quantization", "made-up"], "quantization"],
     [["--vector-dimension", "0"], "vectorDimension"],
     [["--normalization", "none"], "normalization"],
+    [["--embedding-device", "metal"], "embeddingDevice"],
   ] as const)("rejects invalid model setting %#", async (settingArgs, setting) => {
     const root = await makeRoot(`model-${setting}`);
     const locations = externalPaths(`model-${setting}`);

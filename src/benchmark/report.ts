@@ -25,7 +25,7 @@ No absolute source path or corpus content is included.
 ## Corpus and settings
 
 - ${report.corpus.supportedFileCount.toLocaleString()} supported files, ${bytes(report.corpus.totalBytes)}, ${report.indexing.extractedChunkCount.toLocaleString()} chunks
-- ${report.settings.modelId} (${report.settings.quantization}, ${report.settings.vectorDimension} dimensions)
+- ${report.settings.modelId} (${report.settings.embeddingDevice}/${report.settings.quantization}, ${report.settings.vectorDimension} dimensions)
 - ${report.settings.chunkSizeTokens} target tokens with ${report.settings.chunkOverlapTokens} overlap
 - ${report.settings.indexStrategy} vector strategy at a ${report.settings.annThreshold.toLocaleString()}-chunk ANN threshold
 
