@@ -39,6 +39,7 @@ export interface KbissApi {
   subscribe(
     onEvent: (event: ApplicationEventData) => void,
     onConnectionError: (message: string) => void,
+    onConnectionRestored?: () => void,
   ): EventSubscription;
 }
 
@@ -97,6 +98,7 @@ export class BrowserKbissApi implements KbissApi {
   subscribe(
     onEvent: (event: ApplicationEventData) => void,
     onConnectionError: (message: string) => void,
+    onConnectionRestored?: () => void,
   ): EventSubscription {
     const source = new EventSource(`${API_PREFIX}/events`);
     const receive = (raw: Event): void => {
@@ -108,6 +110,7 @@ export class BrowserKbissApi implements KbissApi {
       }
     };
     for (const type of EVENT_TYPES) source.addEventListener(type, receive);
+    source.onopen = () => onConnectionRestored?.();
     source.onerror = () => onConnectionError("Reconnecting to local progress updates…");
     return source;
   }

@@ -97,6 +97,7 @@ class FakeApi implements KbissApi {
   contentCalls = 0;
   eventListener: ((event: ApplicationEventData) => void) | undefined;
   connectionListener: ((message: string) => void) | undefined;
+  connectionRestoredListener: (() => void) | undefined;
   closed = false;
 
   async getStatus(_signal: AbortSignal): Promise<ApplicationStatus> {
@@ -134,9 +135,11 @@ class FakeApi implements KbissApi {
   subscribe(
     onEvent: (event: ApplicationEventData) => void,
     onConnectionError: (message: string) => void,
+    onConnectionRestored?: () => void,
   ): EventSubscription {
     this.eventListener = onEvent;
     this.connectionListener = onConnectionError;
+    this.connectionRestoredListener = onConnectionRestored;
     return { close: () => (this.closed = true) };
   }
 
@@ -179,7 +182,10 @@ describe("Plan 08 React search experience", () => {
     const { input } = await renderReady();
     expect(document.activeElement).toBe(input);
     expect(screen.getByText("card-gateway-artifacts")).toBeTruthy();
-    expect(screen.getByText("Search by what you remember")).toBeTruthy();
+    expect(screen.getByText("Index ready")).toBeTruthy();
+    expect(screen.queryByText("Source")).toBeNull();
+    expect(document.querySelector(".topbar.indexing-compact")).toBeTruthy();
+    expect(screen.getByText("Start typing to search.")).toBeTruthy();
     expect(screen.getByRole("button", { name: "Search" }).hasAttribute("disabled")).toBe(true);
 
     const count = screen.getByRole("combobox", { name: "Show" });
@@ -220,8 +226,9 @@ describe("Plan 08 React search experience", () => {
       },
     });
     await renderReady(api);
+    expect(document.querySelector(".topbar.indexing-active")).toBeTruthy();
     expect(screen.getByText("Building the local index")).toBeTruthy();
-    expect(screen.getByText(/3 of 8 files · 7 chunks committed/)).toBeTruthy();
+    expect(screen.getByText(/3 of 8 files · 7 chunks/)).toBeTruthy();
     const currentFile = screen.getByText("src/workers/very-long-indexing-file.ts");
     expect(currentFile.getAttribute("title")).toBe("src/workers/very-long-indexing-file.ts");
     expect(screen.getByText(/Results may be incomplete/)).toBeTruthy();
@@ -229,7 +236,7 @@ describe("Plan 08 React search experience", () => {
     expect(screen.getByText(/broken\/really-long-file.md/)).toBeTruthy();
 
     act(() => api.connectionListener?.("Reconnecting to local progress updates…"));
-    expect(screen.getByText("Reconnecting to local progress updates…")).toBeTruthy();
+    expect(screen.queryByText("Reconnecting to local progress updates…")).toBeNull();
     const initialProgress = api.status.indexing;
     if (!initialProgress) throw new Error("Expected fixture indexing progress.");
     act(() =>
@@ -245,6 +252,7 @@ describe("Plan 08 React search experience", () => {
     );
     expect(screen.getByText("docs/next-file.md")).toBeTruthy();
     expect(screen.queryByText("src/workers/very-long-indexing-file.ts")).toBeNull();
+    expect(screen.queryByText("Reconnecting to local progress updates…")).toBeNull();
     act(() =>
       api.emit({
         type: "startup",
@@ -620,5 +628,7 @@ describe("Plan 08 React search experience", () => {
     render(<App api={api} debounceMs={1} />);
     expect(await screen.findByText("Status is temporarily unavailable.")).toBeTruthy();
     expect(screen.getByRole("searchbox", { name: "Search the knowledge base" })).toBeTruthy();
+    act(() => api.connectionListener?.("Reconnecting to local progress updates…"));
+    expect(screen.getByText("Reconnecting to local progress updates…")).toBeTruthy();
   });
 });

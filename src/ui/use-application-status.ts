@@ -9,6 +9,11 @@ export interface ApplicationStatusState {
   readonly fileChanges: readonly OpenFileChange[];
 }
 
+function withoutConnectionMessage(state: ApplicationStatusState): ApplicationStatusState {
+  const { connectionMessage: _connectionMessage, ...connected } = state;
+  return connected;
+}
+
 export function useApplicationStatus(api: KbissApi): ApplicationStatusState {
   const [state, setState] = useState<ApplicationStatusState>({ fileChanges: [] });
 
@@ -27,11 +32,14 @@ export function useApplicationStatus(api: KbissApi): ApplicationStatusState {
     const events = api.subscribe(
       (event) =>
         setState((current) => {
-          if (event.type === "files") return { ...current, fileChanges: event.changes };
+          if (event.type === "files") {
+            return { ...withoutConnectionMessage(current), fileChanges: event.changes };
+          }
           const status = applyApplicationEvent(current.status, event);
-          return status ? { ...current, status } : current;
+          return status ? { ...withoutConnectionMessage(current), status } : current;
         }),
       (connectionMessage) => setState((current) => ({ ...current, connectionMessage })),
+      () => setState(withoutConnectionMessage),
     );
     return () => {
       controller.abort();

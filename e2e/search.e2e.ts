@@ -23,7 +23,7 @@ test("keyboard search flow uses the real local API contract", async ({ page }) =
 
   const search = page.getByRole("searchbox", { name: "Search the knowledge base" });
   await expect(search).toBeFocused();
-  await expect(page.getByRole("status").filter({ hasText: "Search is ready" })).toBeVisible();
+  await expect(page.getByRole("status").filter({ hasText: "Index ready" })).toBeVisible();
   await expect(page.getByText("card-gateway-artifacts")).toBeVisible();
 
   await search.fill('timeout_ms("gateway")');
@@ -38,7 +38,7 @@ test("keyboard search flow uses the real local API contract", async ({ page }) =
   );
   await page.keyboard.press("Enter");
   expect((await searchResponse).status()).toBe(200);
-  await expect(page.getByRole("heading", { name: "3 results" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "3 files" })).toBeVisible();
   await expect(page.getByRole("article")).toHaveCount(3);
   await expect(page.locator("mark")).toHaveCount(3);
   const pageWidth = await page.evaluate(() => ({

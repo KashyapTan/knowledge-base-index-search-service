@@ -14,6 +14,7 @@ function replaceFetch(
 class FixtureEventSource {
   static latest: FixtureEventSource | undefined;
   readonly listeners = new Map<string, (event: Event) => void>();
+  onopen: ((event: Event) => void) | null = null;
   onerror: ((event: Event) => void) | null = null;
   closed = false;
 
@@ -152,9 +153,11 @@ describe("browser API adapter", () => {
     const api = new BrowserKbissApi();
     const events: string[] = [];
     const errors: string[] = [];
+    let restored = 0;
     const subscription = api.subscribe(
       (event) => events.push(event.type),
       (message) => errors.push(message),
+      () => restored++,
     );
     const source = FixtureEventSource.latest;
     if (!source) throw new Error("Expected EventSource fixture.");
@@ -177,11 +180,13 @@ describe("browser API adapter", () => {
     source.emit("issue", new MessageEvent("issue", { data: "{" }));
     source.emit("startup", new Event("startup"));
     source.onerror?.(new Event("error"));
+    source.onopen?.(new Event("open"));
     expect(events).toEqual(["snapshot", "files"]);
     expect(errors).toEqual([
       "A progress update could not be read.",
       "Reconnecting to local progress updates…",
     ]);
+    expect(restored).toBe(1);
     subscription.close();
     expect(source.closed).toBe(true);
   });

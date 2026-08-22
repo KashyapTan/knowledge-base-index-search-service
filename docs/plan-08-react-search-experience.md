@@ -46,8 +46,8 @@ move among the distinct-file actions; `/` and Command/Ctrl-K refocus the primary
 Submitted query and count state use `q` and `n` query parameters with `history.replaceState`, so
 typing does not create a history entry for every character. This makes refresh and sharing useful,
 but the current localhost URL—and therefore potentially browser history or a copied URL—contains
-the submitted query. The interface states this privacy tradeoff. No URL state is sent remotely by
-KBISS.
+the submitted query. This contract and the README document the tradeoff without repeating product
+copy in the compact main search surface. No URL state is sent remotely by KBISS.
 
 Opening a result pushes `file=<opaque-id>` and an optional one-based `line` parameter. Back restores
 the prior selection predictably. A refreshed deep link resolves display metadata through the safe
@@ -74,3 +74,20 @@ status endpoint, SSE stream, and search endpoint with deterministic local servic
 asserts the critical keyboard path, accessible names and announcements, focus order and visible
 focus, expansion, file opening, reduced motion, and control contrast. The fixture never loads a
 model or reads a developer repository.
+
+## Post-release shell update (2026-08-21)
+
+The primary search control now lives in a responsive sticky top bar with minimal KBISS branding,
+the indexing/readiness control immediately beside it, and the safe folder basename at the far edge.
+The indexing control retains processed/total files, committed chunks, the current filename,
+progress, and diagnostics; it collapses to a compact `Index ready` badge after indexing. `#236CFF`
+is the single interactive accent across the main search view.
+
+The header grid responds to indexing state. A completed index uses only the ready badge's intrinsic
+width so the search field expands left without a reserved empty column. Active indexing reserves a
+bounded, narrower status column, grows vertically, and wraps the current filename to two lines while
+the search field consumes the remaining width.
+
+SSE reconnect notices are cleared on stream open or any valid event. A transient progress-stream
+reconnect is not presented as an error while committed search remains available; connection copy is
+reserved for startup states where there is no usable search service.

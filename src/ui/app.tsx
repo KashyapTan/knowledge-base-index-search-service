@@ -38,9 +38,11 @@ function StatusPanel({
   const issues = collectIssues(status);
   const progress = status?.indexing;
   const progressMaximum = Math.max(progress?.totalFiles ?? 0, 1);
+  const label = presentation.tone === "ready" ? "Index ready" : presentation.label;
   return (
     <section
       className={`status-panel tone-${presentation.tone}`}
+      title={presentation.detail}
       aria-live="polite"
       aria-atomic="true"
       role={presentation.tone === "error" ? "alert" : "status"}
@@ -48,29 +50,32 @@ function StatusPanel({
       <div className="status-copy">
         <span className="status-dot" aria-hidden="true" />
         <div>
-          <h2>{presentation.label}</h2>
-          <p>{presentation.detail}</p>
+          <h2>{label}</h2>
+          <p className="status-detail">{presentation.detail}</p>
+          {progress && progress.phase !== "complete" ? (
+            <div className="progress-details">
+              <span>
+                {progress.processedFiles} of {progress.totalFiles} files ·{" "}
+                {progress.committedChunks} chunks
+              </span>
+              {progress.currentFile ? (
+                <span className="current-file">
+                  <span className="sr-only">Current file: </span>
+                  <code title={progress.currentFile}>{progress.currentFile}</code>
+                </span>
+              ) : null}
+            </div>
+          ) : null}
         </div>
       </div>
       {progress && progress.phase !== "complete" ? (
-        <div className="progress-copy">
-          <progress value={progress.processedFiles} max={progressMaximum}>
-            {progress.processedFiles} of {progress.totalFiles}
-          </progress>
-          <div className="progress-details">
-            <span>
-              {progress.processedFiles} of {progress.totalFiles} files · {progress.committedChunks}{" "}
-              chunks committed
-            </span>
-            {progress.currentFile ? (
-              <span className="current-file">
-                Current file: <code title={progress.currentFile}>{progress.currentFile}</code>
-              </span>
-            ) : null}
-          </div>
-        </div>
+        <progress value={progress.processedFiles} max={progressMaximum}>
+          {progress.processedFiles} of {progress.totalFiles}
+        </progress>
       ) : null}
-      {connectionMessage ? <p className="connection-message">{connectionMessage}</p> : null}
+      {connectionMessage && !status?.searchAvailable ? (
+        <p className="connection-message">{connectionMessage}</p>
+      ) : null}
       {issues.length > 0 ? (
         <details className="diagnostics">
           <summary>
@@ -219,25 +224,17 @@ export function App({
 
   const partial = resultsMayBeIncomplete(status);
   const hasPreviousResults = results.length > 0;
+  const indexingActive =
+    status?.indexing !== undefined &&
+    status.indexing.phase !== "complete" &&
+    status.indexing.phase !== "cancelled";
   return (
     <div className="app-shell">
-      <header className="masthead">
-        <div>
-          <p className="eyebrow">Local · private · offline</p>
-          <h1>KBISS</h1>
-          <p className="product-description">
-            Find the right artifact without sending it anywhere.
-          </p>
-        </div>
-        <p className="source-root" title={status?.sourceRootLabel ?? "Connecting"}>
-          <span>Source</span>
-          {status?.sourceRootLabel ?? "Connecting…"}
-        </p>
-      </header>
+      <header className={`topbar ${indexingActive ? "indexing-active" : "indexing-compact"}`}>
+        <h1>KBISS</h1>
 
-      <StatusPanel statusState={statusState} />
+        <StatusPanel statusState={statusState} />
 
-      <main>
         {/* biome-ignore lint/a11y/useSemanticElements: React test DOMs do not consistently recognize the newer search element. */}
         <form
           className="search-form"
@@ -247,7 +244,7 @@ export function App({
             search.submitNow();
           }}
         >
-          <label className="search-label" htmlFor="knowledge-search">
+          <label className="sr-only" htmlFor="knowledge-search">
             Search the knowledge base
           </label>
           <div className="search-row">
@@ -263,7 +260,7 @@ export function App({
                 maxLength={4096}
                 autoComplete="off"
                 spellCheck={false}
-                placeholder="Try a filename, error message, path, or concept"
+                placeholder="Search files, paths, or content"
                 aria-describedby="search-help"
                 onChange={(event) => search.setDraft(event.target.value)}
                 onKeyDown={(event) => {
@@ -285,15 +282,11 @@ export function App({
             >
               Search
             </button>
-          </div>
-          <div className="search-options">
-            <p id="search-help">
-              Exact punctuation is preserved. Press <kbd>/</kbd> anywhere to refocus.
-            </p>
-            <label htmlFor="result-count">
-              Show
+            <label className="result-count" htmlFor="result-count">
+              <span className="sr-only">Show</span>
               <select
                 id="result-count"
+                aria-label="Show"
                 value={search.fileCount}
                 onChange={(event) => search.setFileCount(Number(event.target.value))}
               >
@@ -305,8 +298,17 @@ export function App({
               </select>
             </label>
           </div>
+          <p className="sr-only" id="search-help">
+            Exact punctuation is preserved. Press slash anywhere to refocus.
+          </p>
         </form>
 
+        <p className="source-root" title={status?.sourceRootLabel ?? "Connecting"}>
+          {status?.sourceRootLabel ?? "Connecting…"}
+        </p>
+      </header>
+
+      <main>
         {partial ? (
           <p className="partial-notice" role="status">
             Results may be incomplete while the local index is updating.
@@ -319,14 +321,11 @@ export function App({
           aria-busy={search.phase === "loading"}
         >
           <div className="results-heading-row">
-            <div>
-              <p className="section-kicker">Distinct files</p>
-              <h2 id="results-heading">
-                {search.response
-                  ? `${results.length} ${results.length === 1 ? "result" : "results"}`
-                  : "Search results"}
-              </h2>
-            </div>
+            <h2 id="results-heading">
+              {search.response
+                ? `${results.length} ${results.length === 1 ? "file" : "files"}`
+                : "Files"}
+            </h2>
             {search.response ? (
               <span>{Math.round(search.response.timing.totalMs)} ms locally</span>
             ) : null}
@@ -348,12 +347,7 @@ export function App({
           ) : null}
           {search.phase === "idle" ? (
             <div className="empty-state">
-              <span aria-hidden="true">⌕</span>
-              <h3>Search by what you remember</h3>
-              <p>
-                Identifiers, paths, filenames, quoted phrases, and natural-language questions all
-                work.
-              </p>
+              <p>Start typing to search.</p>
             </div>
           ) : null}
           {search.phase === "success" && results.length === 0 ? (
@@ -384,10 +378,6 @@ export function App({
           onClose={closeFile}
         />
       ) : null}
-      <footer className="privacy-footer">
-        Searches stay on this machine. Submitted query and result-count state are reflected in the
-        localhost URL for sharing and refresh.
-      </footer>
     </div>
   );
 }
