@@ -1,6 +1,10 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import type { GrepResult } from "./grep.ts";
-import { browserGrepExecutor, LARGE_FILE_GREP_THRESHOLD } from "./grep-executor.ts";
+import {
+  browserGrepExecutor,
+  createBrowserGrepExecutor,
+  LARGE_FILE_GREP_THRESHOLD,
+} from "./grep-executor.ts";
 
 const originalWorker = globalThis.Worker;
 
@@ -74,5 +78,23 @@ describe("browser grep execution", () => {
     controller.abort();
     await expect(cancelled).rejects.toMatchObject({ name: "AbortError" });
     expect(cancelledWorker?.terminated).toBe(true);
+  });
+
+  test("isolates every regex and terminates work that exceeds its deadline", async () => {
+    installWorker();
+    const executor = createBrowserGrepExecutor(5);
+    const operation = executor(
+      "small input",
+      { query: "(a|aa)+$", regex: true, caseSensitive: true },
+      new AbortController().signal,
+    );
+    const worker = FakeWorker.latest;
+    expect(worker?.posted).toBeDefined();
+    await expect(operation).resolves.toEqual({
+      matches: [],
+      error: "The regular expression exceeded the safe execution deadline.",
+      limited: false,
+    });
+    expect(worker?.terminated).toBe(true);
   });
 });

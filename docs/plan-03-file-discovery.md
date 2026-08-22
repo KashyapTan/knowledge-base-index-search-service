@@ -23,10 +23,13 @@ opaque Plan 2 root identity, and the NFC-normalized POSIX-style relative path. I
 absolute path or a caller-supplied path.
 
 The scanner traverses directory entries in stable code-point order and fingerprints files with
-bounded concurrency (eight by default). Hidden content is included. `.git` segments are always
-excluded; no other broad directory exclusions are implicit. Teams may pass root-relative `*`,
-`**`, and `?` glob rules through `ignorePatterns`; a trailing slash makes a rule directory-only.
-Plan 2's state and cache paths are also explicitly excluded by the composed scanner.
+bounded concurrency (eight by default). Hidden content is included unless ignored by configuration.
+
+Normal application scans use the resolved cross-language `ignorePatterns` defaults for dependency,
+environment, build, cache, test-report, editor, and compiled output. A user configuration array
+replaces those defaults, while an explicit scanner option may override them for controlled tests and
+benchmarks. Rules support root-relative `*`, `**`, and `?` globs; a trailing slash makes a rule
+directory-only. `.git` and Plan 2's state/cache paths remain unconditional exclusions.
 
 Symbolic links are resolved before traversal. Targets outside the canonical root become `unsafe`
 per-file records and are never opened. Canonical directories are opened through directory handles,

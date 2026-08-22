@@ -23,9 +23,14 @@ describe("discovery service composition", () => {
     const cache = join(fixture, "cache");
     const metadata = join(state, "metadata");
     await Promise.all([mkdir(root), mkdir(metadata, { recursive: true }), mkdir(cache)]);
-    await writeFile(join(root, "document.md"), "# Document");
+    await mkdir(join(root, "node_modules"));
+    await Promise.all([
+      writeFile(join(root, "document.md"), "# Document"),
+      writeFile(join(root, "node_modules", "dependency.js"), "export const generated = true;"),
+    ]);
     const config: AppConfig = {
       embedding: DEFAULT_EMBEDDING_CONFIG,
+      ignorePatterns: ["node_modules/"],
       index: DEFAULT_INDEX_CONFIG,
       offline: false,
       sourceRoots: [{ identity: "root-id", path: root }],
@@ -57,15 +62,29 @@ describe("discovery service composition", () => {
       },
     };
 
-    const service = await createDiscoveryService(config, {
-      scanner: { concurrency: 2, ignorePatterns: ["ignored/**"] },
-    });
+    const service = await createDiscoveryService(config, { scanner: { concurrency: 2 } });
     expect(service.ok).toBe(true);
     if (!service.ok) return;
     const scan = await service.value.scanner.scan();
     expect(scan.ok).toBe(true);
     expect(service.value.manifest.snapshot()[0]?.relativePath).toBe("document.md");
+    expect(service.value.manifest.snapshot()).toHaveLength(1);
     expect(await Bun.file(join(metadata, "file-manifest.json")).exists()).toBe(true);
     expect(await Bun.file(join(root, "file-manifest.json")).exists()).toBe(false);
+
+    const unfilteredMetadata = join(state, "unfiltered-metadata");
+    await mkdir(unfilteredMetadata);
+    const unfiltered = await createDiscoveryService({
+      ...config,
+      ignorePatterns: [],
+      paths: { ...config.paths, indexMetadataDir: unfilteredMetadata },
+    });
+    expect(unfiltered.ok).toBe(true);
+    if (!unfiltered.ok) return;
+    const unfilteredScan = await unfiltered.value.scanner.scan();
+    expect(unfilteredScan.ok).toBe(true);
+    expect(unfiltered.value.manifest.snapshot().map((file) => file.relativePath)).toContain(
+      "node_modules/dependency.js",
+    );
   });
 });

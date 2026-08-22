@@ -26,6 +26,7 @@ The sources map as follows:
 | Offline model policy | `--offline[=true|false]` | `KBISS_OFFLINE` | `offline` | `false` |
 | State directory | `--state-dir` | `KBISS_STATE_DIR` | `stateDir` | OS-specific |
 | Cache directory | `--cache-dir` | `KBISS_CACHE_DIR` | `cacheDir` | OS-specific |
+| Discovery ignores | n/a | n/a | `ignorePatterns` | Cross-language generated/dependency defaults |
 | Config file | `--config` | `KBISS_CONFIG_FILE` | n/a | OS-specific |
 
 Options accept either `--name value` or `--name=value`. An explicitly selected config file must
@@ -50,9 +51,15 @@ Example:
   "port": 3210,
   "modelId": "Xenova/bge-small-en-v1.5",
   "quantization": "q8",
-  "vectorDimension": 384
+  "vectorDimension": 384,
+  "ignorePatterns": ["node_modules/", ".venv/", "dist/", "build/"]
 }
 ```
+
+`ignorePatterns` is an optional root-relative glob array. When absent, KBISS uses its complete
+cross-language default list; when present, the array replaces that list, and `[]` disables every
+configurable default. Empty, absolute, parent-traversing, oversized, or non-string rules are
+rejected. `.git` and the resolved KBISS state/cache paths remain unconditional exclusions.
 
 `~` is expanded with the operating-system home-directory API. Relative paths resolve against the
 startup working directory. The source root is then resolved with `realpath`, checked to be a

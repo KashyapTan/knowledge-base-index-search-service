@@ -3,6 +3,7 @@ import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { FileChange } from "../discovery/index.ts";
+import type { IndexingProgress, IndexStore } from "./contracts.ts";
 import { FakeEmbeddingProvider } from "./fake-embedding-provider.ts";
 import { openLanceIndex } from "./lance-store.ts";
 import { createIndexingService } from "./service.ts";
@@ -61,13 +62,28 @@ describe("resumable indexing orchestration", () => {
     const embeddings = new FakeEmbeddingProvider({ dimension: 4, batchSize: 1 });
     const opened = await openLanceIndex(config);
     if (!opened.ok) throw new Error(opened.error.message);
+    let refreshCalls = 0;
+    const delegate = opened.value;
+    const store: IndexStore = {
+      getFile: delegate.getFile.bind(delegate),
+      getFiles: delegate.getFiles.bind(delegate),
+      getChunks: delegate.getChunks.bind(delegate),
+      replaceFile: delegate.replaceFile.bind(delegate),
+      markFileFailed: delegate.markFileFailed.bind(delegate),
+      deleteFile: delegate.deleteFile.bind(delegate),
+      async refreshSearchIndexes() {
+        refreshCalls += 1;
+        return delegate.refreshSearchIndexes();
+      },
+      close: delegate.close.bind(delegate),
+    };
     const service = createIndexingService(config, {
       extraction,
       embeddings,
-      store: opened.value,
+      store,
     });
-    const events: string[] = [];
-    const unsubscribe = service.subscribeProgress((progress) => events.push(progress.phase));
+    const events: IndexingProgress[] = [];
+    const unsubscribe = service.subscribeProgress((progress) => events.push(progress));
 
     const initial = await service.indexFiles([first]);
     expect(initial.ok).toBe(true);
@@ -78,11 +94,13 @@ describe("resumable indexing orchestration", () => {
     }
     expect(embeddings.embeddedTexts).toHaveLength(2);
     expect(extraction.calls).toBe(1);
+    expect(refreshCalls).toBe(1);
 
     const unchanged = await service.indexFiles([first]);
     expect(unchanged.ok && unchanged.value.progress.unchangedFiles).toBe(1);
     expect(embeddings.embeddedTexts).toHaveLength(2);
     expect(extraction.calls).toBe(1);
+    expect(refreshCalls).toBe(1);
 
     const metadataOnly = {
       ...first,
@@ -97,6 +115,7 @@ describe("resumable indexing orchestration", () => {
     expect(metadataRun.ok && metadataRun.value.progress.unchangedFiles).toBe(1);
     expect(embeddings.embeddedTexts).toHaveLength(2);
     expect(extraction.calls).toBe(1);
+    expect(refreshCalls).toBe(1);
 
     const changed = await service.indexFiles([second]);
     expect(changed.ok).toBe(true);
@@ -106,11 +125,14 @@ describe("resumable indexing orchestration", () => {
       expect(changed.value.progress.committedChunks).toBe(2);
     }
     expect(embeddings.embeddedTexts).toHaveLength(3);
+    expect(refreshCalls).toBe(2);
     const chunks = await opened.value.getChunks(first.fileId);
     expect(chunks.ok && chunks.value.map((chunk) => chunk.chunkId)).toEqual(["kept", "added"]);
-    expect(events).toContain("extracting");
-    expect(events).toContain("embedding");
-    expect(events.at(-1)).toBe("complete");
+    expect(events.some((event) => event.phase === "extracting")).toBe(true);
+    expect(events.some((event) => event.phase === "embedding")).toBe(true);
+    expect(events.some((event) => event.currentFile === "docs/guide.md")).toBe(true);
+    expect(events.at(-1)).toMatchObject({ phase: "complete" });
+    expect(events.at(-1)?.currentFile).toBeUndefined();
     unsubscribe();
     opened.value.close();
   });
@@ -126,6 +148,14 @@ describe("resumable indexing orchestration", () => {
       readStatus: "unreadable",
       lastError: "The file is unreadable.",
     });
+    const binary = indexableFile("image.png", "binary", {
+      extension: ".png",
+      format: "unknown",
+      mimeFamily: "application/octet-stream",
+      readStatus: "malformed",
+      indexStatus: "skipped",
+      lastError: "The file is not valid UTF-8 text.",
+    });
     const extraction = new FixtureExtractionPipeline([
       ["good", extracted(good, [searchChunk(good, "good-chunk", "good text", 0)])],
     ]);
@@ -136,17 +166,18 @@ describe("resumable indexing orchestration", () => {
       embeddings: new FakeEmbeddingProvider({ dimension: 4 }),
       store: opened.value,
     });
-    const progressEvents: Array<{ readonly estimatedCompletionMs?: number }> = [];
+    const progressEvents: IndexingProgress[] = [];
     service.subscribeProgress((progress) => progressEvents.push(progress));
-    const first = await service.indexFiles([bad, good]);
+    const first = await service.indexFiles([bad, binary, good]);
     expect(first.ok).toBe(true);
     if (first.ok) {
       expect(first.value.progress.failedFiles).toBe(1);
+      expect(first.value.progress.skippedFiles).toBe(1);
       expect(first.value.progress.errors[0]).toMatchObject({
         fileId: bad.fileId,
         code: "FILE_NOT_READY",
       });
-      expect(first.value.progress.processedFiles).toBe(2);
+      expect(first.value.progress.processedFiles).toBe(3);
     }
     expect(progressEvents.some((progress) => progress.estimatedCompletionMs !== undefined)).toBe(
       true,
@@ -160,6 +191,12 @@ describe("resumable indexing orchestration", () => {
     };
     const removed = await service.applyChanges([deletion]);
     expect(removed.ok && removed.value.progress.deletedFiles).toBe(1);
+    expect(
+      progressEvents.some(
+        (progress) => progress.phase === "deleting" && progress.currentFile === good.relativePath,
+      ),
+    ).toBe(true);
+    expect(progressEvents.at(-1)?.currentFile).toBeUndefined();
     expect(await opened.value.getFile(good.fileId)).toEqual({ ok: true, value: undefined });
     opened.value.close();
   });

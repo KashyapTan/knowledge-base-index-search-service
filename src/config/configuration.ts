@@ -13,6 +13,7 @@ import type {
 import { LOOPBACK_HOST } from "./contracts.ts";
 import {
   DEFAULT_EMBEDDING_CONFIG,
+  DEFAULT_IGNORE_PATTERNS,
   DEFAULT_INDEX_CONFIG,
   DEFAULT_PORT,
   DEFAULT_SOURCE_ROOT,
@@ -28,6 +29,7 @@ import {
 
 interface RawConfig {
   readonly cacheDir?: string;
+  readonly ignorePatterns?: readonly string[];
   readonly modelId?: string;
   readonly normalization?: string;
   readonly offline?: string | boolean;
@@ -119,6 +121,7 @@ function environmentConfig(env: Readonly<Record<string, string | undefined>>): C
 
 const allowedConfigKeys = new Set<keyof RawConfig>([
   "cacheDir",
+  "ignorePatterns",
   "modelId",
   "normalization",
   "offline",
@@ -149,11 +152,13 @@ function parseConfigFileValue(value: unknown): Result<RawConfig, ConfigurationEr
   }
   for (const [key, setting] of Object.entries(record)) {
     const validType =
-      key === "port" || key === "vectorDimension"
-        ? typeof setting === "number" || typeof setting === "string"
-        : key === "offline"
-          ? typeof setting === "boolean" || typeof setting === "string"
-          : typeof setting === "string";
+      key === "ignorePatterns"
+        ? Array.isArray(setting) && setting.every((pattern) => typeof pattern === "string")
+        : key === "port" || key === "vectorDimension"
+          ? typeof setting === "number" || typeof setting === "string"
+          : key === "offline"
+            ? typeof setting === "boolean" || typeof setting === "string"
+            : typeof setting === "string";
     if (!validType) {
       return err({
         code: "CONFIG_FILE_INVALID",
@@ -236,6 +241,39 @@ function parseBoolean(
   });
 }
 
+function parseIgnorePatterns(
+  value: readonly string[],
+): Result<readonly string[], ConfigurationError> {
+  if (value.length > 256) {
+    return err({
+      code: "CONFIG_VALUE_INVALID",
+      message: "ignorePatterns must contain no more than 256 entries.",
+      details: { setting: "ignorePatterns" },
+    });
+  }
+  const patterns: string[] = [];
+  for (const input of value) {
+    const pattern = input.trim().replaceAll("\\", "/");
+    const segments = pattern.replace(/\/$/u, "").split("/");
+    if (
+      !pattern ||
+      pattern.length > 256 ||
+      pattern.startsWith("/") ||
+      pattern.includes("\0") ||
+      segments.includes("..")
+    ) {
+      return err({
+        code: "CONFIG_VALUE_INVALID",
+        message:
+          "Each ignorePatterns entry must be a non-empty root-relative glob without parent traversal.",
+        details: { setting: "ignorePatterns" },
+      });
+    }
+    if (!patterns.includes(pattern)) patterns.push(pattern);
+  }
+  return ok(Object.freeze(patterns));
+}
+
 function compatibilityNamespaceInput(compatibility: IndexCompatibility): string {
   return JSON.stringify({
     chunking: compatibility.chunking,
@@ -279,7 +317,7 @@ export async function loadAppConfig(
   const file = await readUserConfig(configFilePath.value, selectedConfigFile !== undefined);
   if (!file.ok) return file;
 
-  const merged: Required<RawConfig> = {
+  const merged = {
     cacheDir:
       cli.value.cacheDir ??
       environment.cacheDir ??
@@ -290,6 +328,7 @@ export async function loadAppConfig(
       environment.modelId ??
       file.value.modelId ??
       DEFAULT_EMBEDDING_CONFIG.modelId,
+    ignorePatterns: file.value.ignorePatterns ?? DEFAULT_IGNORE_PATTERNS,
     normalization:
       cli.value.normalization ??
       environment.normalization ??
@@ -342,6 +381,8 @@ export async function loadAppConfig(
   }
   const offline = parseBoolean(merged.offline, "offline");
   if (!offline.ok) return offline;
+  const ignorePatterns = parseIgnorePatterns(merged.ignorePatterns);
+  if (!ignorePatterns.ok) return ignorePatterns;
 
   const sourceRoot = await canonicalizeSourceRoot(merged.root, { cwd, homeDir });
   if (!sourceRoot.ok) return sourceRoot;
@@ -375,6 +416,7 @@ export async function loadAppConfig(
   return ok({
     compatibility,
     embedding,
+    ignorePatterns: ignorePatterns.value,
     index: DEFAULT_INDEX_CONFIG,
     offline: offline.value,
     paths: paths.value,

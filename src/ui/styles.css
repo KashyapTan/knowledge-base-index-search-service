@@ -204,6 +204,26 @@ h1 {
   margin: 0.8rem 0 0 1.4rem;
 }
 
+.progress-details {
+  display: grid;
+  min-width: 0;
+  gap: 0.12rem;
+}
+
+.current-file {
+  display: flex;
+  min-width: 0;
+  gap: 0.35rem;
+  font-size: 0.78rem;
+}
+
+.current-file code {
+  overflow: hidden;
+  color: var(--ink);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 progress {
   width: min(16rem, 40vw);
   height: 0.48rem;
@@ -1075,6 +1095,11 @@ mark {
     align-items: flex-start;
     flex-direction: column;
     gap: 0.25rem;
+  }
+
+  .progress-details,
+  .current-file {
+    width: 100%;
   }
 
   progress {

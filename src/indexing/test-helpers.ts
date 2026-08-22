@@ -21,6 +21,7 @@ export function indexingConfig(
   const metadata = join(state, "metadata");
   return {
     embedding,
+    ignorePatterns: [],
     index: DEFAULT_INDEX_CONFIG,
     offline: false,
     sourceRoots: [{ identity: "indexing-test-root", path: root }],

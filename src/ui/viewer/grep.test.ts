@@ -42,6 +42,18 @@ describe("in-file grep", () => {
     });
   });
 
+  test("rejects regex denial-of-service constructs before evaluation", () => {
+    for (const query of ["(a+)+$", "(.*){2,}", "^(a+)\\1$", "a".repeat(513)]) {
+      const result = runGrep("a".repeat(10_000), {
+        query,
+        regex: true,
+        caseSensitive: true,
+      });
+      expect(result.matches).toEqual([]);
+      expect(result.error).toMatch(/safe|unsafe/u);
+    }
+  });
+
   test("bounds huge result sets and navigates with wraparound and source-line selection", () => {
     const bounded = runGrep("aaaa", {
       query: "a",

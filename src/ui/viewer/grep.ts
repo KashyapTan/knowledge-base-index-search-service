@@ -19,6 +19,19 @@ export interface GrepResult {
 }
 
 const DEFAULT_MAXIMUM_MATCHES = 20_000;
+const MAXIMUM_REGEX_LENGTH = 512;
+const nestedQuantifier = /\((?:[^()\\]|\\.)*[*+{](?:[^()\\]|\\.)*\)\s*[*+{]/u;
+const numericBackreference = /(^|[^\\])(?:\\\\)*\\[1-9]/u;
+
+function regexSafetyError(pattern: string): string | undefined {
+  if (pattern.length > MAXIMUM_REGEX_LENGTH) {
+    return "The regular expression is too long to run safely.";
+  }
+  if (nestedQuantifier.test(pattern) || numericBackreference.test(pattern)) {
+    return "The regular expression uses a potentially unsafe backtracking construct.";
+  }
+  return undefined;
+}
 
 function lineStarts(content: string): number[] {
   const starts = [0];
@@ -103,6 +116,8 @@ export function runGrep(content: string, options: GrepOptions): GrepResult {
   }
 
   let expression: RegExp;
+  const safetyError = regexSafetyError(options.query);
+  if (safetyError) return { matches: [], error: safetyError, limited: false };
   try {
     expression = new RegExp(options.query, options.caseSensitive ? "gu" : "giu");
   } catch {

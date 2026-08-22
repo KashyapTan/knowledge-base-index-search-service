@@ -160,6 +160,7 @@ export function resolvedConfiguration(config: AppConfig): Record<string, unknown
     rootIdentity: config.sourceRoots[0].identity,
     server: config.server,
     offline: config.offline,
+    ignorePatterns: config.ignorePatterns,
     embedding: config.embedding,
     index: config.index,
     paths: config.paths,

@@ -283,6 +283,11 @@ export class LanceCandidateRetriever implements CandidateRetriever {
 
   async #loadCatalog(signal?: AbortSignal): Promise<CatalogCache> {
     checkCancellation(signal);
+    // The index writer and retriever intentionally use separate LanceDB connections. A table
+    // handle is snapshot-scoped, so refresh it before checking versions or a long-lived server can
+    // miss files committed during background indexing until the process restarts.
+    await Promise.all([this.#files.checkoutLatest(), this.#chunks.checkoutLatest()]);
+    checkCancellation(signal);
     const [filesVersion, chunksVersion] = await Promise.all([
       this.#files.version(),
       this.#chunks.version(),

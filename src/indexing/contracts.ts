@@ -124,6 +124,9 @@ export interface IndexStoreError extends AppError<IndexStoreErrorCode> {}
 
 export interface IndexStore {
   getFile(fileId: string): Promise<Result<IndexedFileRecord | undefined, IndexStoreError>>;
+  getFiles(
+    fileIds: readonly string[],
+  ): Promise<Result<readonly IndexedFileRecord[], IndexStoreError>>;
   getChunks(fileId: string): Promise<Result<readonly IndexedChunkRecord[], IndexStoreError>>;
   replaceFile(
     file: IndexedFileRecord,
@@ -157,9 +160,12 @@ export interface IndexingFileError {
 
 export interface IndexingProgress {
   readonly phase: IndexingPhase;
+  /** Root-relative path of the file currently being processed, when applicable. */
+  readonly currentFile?: string;
   readonly totalFiles: number;
   readonly processedFiles: number;
   readonly unchangedFiles: number;
+  readonly skippedFiles: number;
   readonly failedFiles: number;
   readonly deletedFiles: number;
   readonly totalChunks: number;

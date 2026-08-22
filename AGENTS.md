@@ -82,6 +82,9 @@ Search returns distinct files, not merely top chunks. Retrieve a broader candida
 ## Indexing principles
 
 - Initial indexing is incremental and resumable.
+- Apply the configurable cross-language ignore defaults before traversal so dependency trees,
+  environments, generated builds, caches, and compiled artifacts are not indexed out of the box;
+  preserve a user-controlled replacement list for repositories that intentionally need them.
 - Use cheap metadata checks first and content hashing only when needed.
 - Re-embed only new or changed chunks; remove records for deleted files.
 - Batch inference and apply bounded concurrency/backpressure.

@@ -3,7 +3,7 @@ import { chmod, mkdir, mkdtemp, realpath, rm, symlink, writeFile } from "node:fs
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { loadAppConfig, parseCliOptions } from "./configuration.ts";
-import { DEFAULT_PORT } from "./defaults.ts";
+import { DEFAULT_IGNORE_PATTERNS, DEFAULT_PORT } from "./defaults.ts";
 import {
   canonicalizeSourceRoot,
   createRootIdentity,
@@ -175,7 +175,57 @@ describe("configuration precedence and validation", () => {
     expect(result.value.sourceRoots[0].path).toBe(environmentRoot);
     expect(result.value.server.port).toBe(4100);
     expect(result.value.embedding.vectorDimension).toBe(384);
+    expect(result.value.ignorePatterns).toEqual(DEFAULT_IGNORE_PATTERNS);
   });
+
+  test("lets the user configuration replace or remove every default ignore pattern", async () => {
+    const root = await makeRoot("ignore-root");
+    const locations = externalPaths("ignore");
+    const configFile = join(fixtureDir, "ignore.json");
+    await writeFile(
+      configFile,
+      JSON.stringify({ ignorePatterns: ["generated/", "nested\\cache/", "generated/"] }),
+    );
+    const configured = await loadAppConfig({
+      argv: ["--config", configFile, "--root", root],
+      env: { KBISS_STATE_DIR: locations.stateDir, KBISS_CACHE_DIR: locations.cacheDir },
+      homeDir: fixtureDir,
+      projectDir,
+    });
+    expect(configured.ok && configured.value.ignorePatterns).toEqual([
+      "generated/",
+      "nested/cache/",
+    ]);
+
+    await writeFile(configFile, JSON.stringify({ ignorePatterns: [] }));
+    const disabled = await loadAppConfig({
+      argv: ["--config", configFile, "--root", root],
+      env: { KBISS_STATE_DIR: locations.stateDir, KBISS_CACHE_DIR: locations.cacheDir },
+      homeDir: fixtureDir,
+      projectDir,
+    });
+    expect(disabled.ok && disabled.value.ignorePatterns).toEqual([]);
+  });
+
+  test.each(["", "/absolute/", "../outside/", "nested/../outside/"])(
+    "rejects unsafe ignore pattern %s",
+    async (pattern) => {
+      const root = await makeRoot(`ignore-${crypto.randomUUID()}`);
+      const locations = externalPaths(crypto.randomUUID());
+      const configFile = join(fixtureDir, `${crypto.randomUUID()}.json`);
+      await writeFile(configFile, JSON.stringify({ ignorePatterns: [pattern] }));
+      const result = await loadAppConfig({
+        argv: ["--config", configFile, "--root", root],
+        env: { KBISS_STATE_DIR: locations.stateDir, KBISS_CACHE_DIR: locations.cacheDir },
+        homeDir: fixtureDir,
+        projectDir,
+      });
+      expect(result).toMatchObject({
+        ok: false,
+        error: { code: "CONFIG_VALUE_INVALID", details: { setting: "ignorePatterns" } },
+      });
+    },
+  );
 
   test("expands the default root from the operating-system home directory", async () => {
     const defaultRoot = join(fixtureDir, "dev", "card-gateway-artifacts");
@@ -255,6 +305,7 @@ describe("configuration precedence and validation", () => {
     ["[]", "must contain a JSON object"],
     ['{"unknown": true}', "unknown setting"],
     ['{"port": false}', "wrong type"],
+    ['{"ignorePatterns":"node_modules/"}', "wrong type"],
   ])("reports malformed user configuration %#", async (contents, message) => {
     const root = await makeRoot(`bad-config-${message.replaceAll(" ", "-")}`);
     const configFile = join(fixtureDir, `${crypto.randomUUID()}.json`);

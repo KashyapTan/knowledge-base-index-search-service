@@ -1,0 +1,17 @@
+{
+  "coverage": {
+    "lines": 93,
+    "functions": 93
+  },
+  "controlledRelevance": {
+    "recallAt5": 0.9,
+    "recallAt10": 0.95,
+    "meanReciprocalRank": 0.8
+  },
+  "benchmark": {
+    "maximumFailureRatio": 0.01,
+    "maximumWarmQueryP95Ms": 5000,
+    "maximumViewerOpenMs": 2000,
+    "maximumViewerGrepMs": 2000
+  }
+}

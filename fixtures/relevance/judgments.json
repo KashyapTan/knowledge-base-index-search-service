@@ -1,0 +1,71 @@
+{
+  "version": 1,
+  "name": "KBISS controlled mixed-format relevance corpus",
+  "corpus": "fixtures/relevance/repository",
+  "judgments": [
+    {
+      "id": "exact-filename",
+      "query": "payment-retries.md",
+      "expectedFiles": ["docs/payment-retries.md"],
+      "category": "filename-path",
+      "rationale": "An exact filename must receive deterministic metadata preference."
+    },
+    {
+      "id": "exact-path",
+      "query": "src/config/payment.ts",
+      "expectedFiles": ["src/config/payment.ts"],
+      "category": "filename-path",
+      "rationale": "A root-relative code path must remain directly findable."
+    },
+    {
+      "id": "configuration-key",
+      "query": "PAYMENT_TIMEOUT_MS",
+      "expectedFiles": ["src/config/payment.ts"],
+      "relevantSections": { "src/config/payment.ts": ["PAYMENT_TIMEOUT_MS"] },
+      "category": "symbol-config",
+      "rationale": "Exact configuration identifiers should beat prose with incidental timeout words."
+    },
+    {
+      "id": "symbol",
+      "query": "BackoffScheduler",
+      "expectedFiles": ["src/retry.py"],
+      "relevantSections": { "src/retry.py": ["BackoffScheduler"] },
+      "category": "symbol-config",
+      "rationale": "A class name should resolve to the declaration rather than keyword-heavy prose."
+    },
+    {
+      "id": "exact-error",
+      "query": "\"Gateway handshake failed: certificate pin mismatch\"",
+      "expectedFiles": ["docs/troubleshooting.html"],
+      "relevantSections": { "docs/troubleshooting.html": ["Certificate failures"] },
+      "category": "error-message",
+      "rationale": "Quoted operational errors require positional BM25 phrase matching."
+    },
+    {
+      "id": "conceptual-backoff",
+      "query": "how should temporary processor failures be retried",
+      "expectedFiles": ["docs/payment-retries.md", "src/retry.py"],
+      "relevantSections": {
+        "docs/payment-retries.md": ["Transient failures"],
+        "src/retry.py": ["BackoffScheduler"]
+      },
+      "category": "concept",
+      "rationale": "The conceptual query has both policy and implementation answers."
+    },
+    {
+      "id": "synonym-idempotency",
+      "query": "prevent charging a customer twice when a request is repeated",
+      "expectedFiles": ["docs/idempotency.md"],
+      "relevantSections": { "docs/idempotency.md": ["Duplicate suppression"] },
+      "category": "synonym",
+      "rationale": "The query describes idempotency without using that exact term."
+    },
+    {
+      "id": "mixed-exact-semantic",
+      "query": "retry_payment exponential delay",
+      "expectedFiles": ["src/retry.py", "docs/payment-retries.md"],
+      "category": "mixed",
+      "rationale": "A symbol plus conceptual qualifier should retrieve implementation and policy."
+    }
+  ]
+}

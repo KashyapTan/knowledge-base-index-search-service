@@ -55,6 +55,8 @@ export interface IndexCompatibility {
 
 export interface AppConfig {
   readonly embedding: EmbeddingConfig;
+  /** Root-relative glob rules resolved from user configuration or the cross-language defaults. */
+  readonly ignorePatterns: readonly string[];
   readonly index: IndexConfig;
   /** Prevent every model-loading path from using the network. */
   readonly offline: boolean;
