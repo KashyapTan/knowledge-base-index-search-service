@@ -179,3 +179,52 @@ handoff. Network-free default tests must remain deterministic.
 Plan 13 uses the versioned profile, exact token accounting, and typed-vector protocol to optimize the
 full indexing pipeline without changing vector semantics. Plan 14 then evaluates search quality and
 selects the final model/profile using real mixed-format judgments.
+
+## Completion notes (2026-08-22)
+
+Implemented on branch `plan-12-versioned-embedding-runtime`.
+
+- Added a closed, deeply immutable `EmbeddingModelProfile` registry for BGE small/base, GTE
+  ModernBERT, EmbeddingGemma, Qwen3 Embedding, and Jina code. Every profile pins a Hub commit and
+  owns pooling/tensor, native and Matryoshka dimensions, prompt identities, exact tokenizer policy
+  and overhead, context/application limits, reviewed device/dtype/batching paths, provenance, and
+  license eligibility. Configuration now derives profile defaults and rejects unknown or
+  incompatible selections before indexing.
+- Recorded `nomic-ai/CodeRankEmbed` as unavailable because its pinned repository has no reviewed
+  ONNX/Transformers.js artifact and requires custom code. BGE-small remains the default; no Plan 14
+  relevance or default-model decision was pulled forward.
+- Implemented masked mean, CLS, last-active-token, and required named-output pooling with strict
+  tensor/mask/count/finite/dimension/normalization validation. Matryoshka truncation precedes fresh
+  L2 normalization. Query and document prompts are composed independently once, and prompt-aware
+  special-token counts drive extraction limits and accelerator buckets.
+- Pinned both model and tokenizer acquisition. A Transformers.js 4.2 metadata probe ignores the
+  tokenizer's revision/cache options, so explicit setup downloads only the two inert tokenizer JSON
+  assets from the immutable commit and all later tokenizer loads target that exact local revision
+  directory. Inference remains network-disabled and no custom code is fetched or executed.
+- Extended model namespaces, asset manifest version 2, compatibility descriptor version 3, and
+  controlled rebuild comparisons with every vector-affecting profile field. The manifest records
+  revision/profile/provenance, selected ONNX output, tensor/pooling, prompt identities, dimension,
+  device/dtype, and checksums while retaining symlink/path rejection.
+- Replaced nested Worker number arrays with one transferable contiguous `Float32Array`; validated
+  zero-copy row views flow through indexing, search, and LanceDB. Bounded queues, cancellation,
+  crash handling, worker counts, result ordering, and graceful disposal remain covered.
+- Removed the production main-process tokenizer load. Extraction workers own pinned local
+  tokenizers, while the Bun HTTP thread only constructs the bounded worker pools.
+
+Verification completed:
+
+- `bun run typecheck`
+- `bun run lint`
+- `bun test`: 402 passed, 7 opt-in smokes skipped, 0 failed
+- `bun run test:coverage`: governed gate passed at 94.93% lines and 95.82% functions; raw aggregate
+  was 97.34% lines and 96.97% functions
+- `bun run build`: production Vite build and final TypeScript check passed
+- `bun run test:e2e`: Playwright keyboard-search flow passed
+- `bun run smoke:operations`: controlled first setup and offline restart passed
+- `bun run test:relevance`: controlled Recall@5/10 and MRR remained 1.0 with zero file failures
+- pinned BGE-small CPU/q8 cached-assets smoke: 1 passed
+- all selectable pinned CPU/q8 candidate smokes: 6 passed, including EmbeddingGemma at 256 and
+  Qwen3 at 512 dimensions; every run was offline during inference and shut down cleanly
+
+Detailed contracts, profile table, smoke variables, and Plan 13/14 handoff are recorded in
+`docs/plan-12-versioned-embedding-model-profiles-and-runtime.md`.

@@ -15,6 +15,11 @@ export type {
   ConfiguredEmbeddingDevice,
   EmbeddingConfig,
   EmbeddingDevice,
+  EmbeddingEncodingConfig,
+  EmbeddingPoolingConfig,
+  EmbeddingPoolingStrategy,
+  EmbeddingProfileCompatibility,
+  EmbeddingTokenizerConfig,
   IndexCompatibility,
   IndexConfig,
   ResolvedPaths,
@@ -37,6 +42,20 @@ export {
   SUPPORTED_EMBEDDING_DEVICES,
   SUPPORTED_QUANTIZATIONS,
 } from "./defaults.ts";
+export {
+  composeEmbeddingInput,
+  DEFAULT_EMBEDDING_MODEL_ID,
+  EMBEDDING_MODEL_PROFILES,
+  type EmbeddingExecutionProfile,
+  type EmbeddingModelProfile,
+  type EmbeddingTaskAlternative,
+  embeddingConfigFromProfile,
+  findEmbeddingModelProfile,
+  resolveProfileDevice,
+  UNAVAILABLE_EMBEDDING_CANDIDATES,
+  type UnavailableEmbeddingCandidate,
+  validateEmbeddingModelProfile,
+} from "./embedding-profiles.ts";
 export {
   canonicalizeSourceRoot,
   createRootIdentity,

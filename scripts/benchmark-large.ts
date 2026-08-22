@@ -6,8 +6,7 @@ import {
   renderBenchmarkMarkdown,
   runLargeRepositoryBenchmark,
 } from "../src/benchmark/index.ts";
-import type { EmbeddingDevice } from "../src/config/index.ts";
-import { BGE_MODEL_PROFILES } from "../src/indexing/index.ts";
+import { EMBEDDING_MODEL_PROFILES, type EmbeddingDevice } from "../src/config/index.ts";
 
 interface Cli {
   readonly root: string;
@@ -38,8 +37,8 @@ function parseCli(argv: readonly string[]): Cli {
   if (!root || !outputValue) throw new Error("--root and --output are required.");
   const output = resolve(outputValue);
   const modelId = value(argv, "--model") ?? "Xenova/bge-small-en-v1.5";
-  const profile = BGE_MODEL_PROFILES[modelId as keyof typeof BGE_MODEL_PROFILES];
-  const vectorDimension = Number(value(argv, "--vector-dimension") ?? profile?.vectorDimension);
+  const profile = EMBEDDING_MODEL_PROFILES[modelId as keyof typeof EMBEDDING_MODEL_PROFILES];
+  const vectorDimension = Number(value(argv, "--vector-dimension") ?? profile?.nativeDimension);
   if (!Number.isInteger(vectorDimension) || vectorDimension < 1) {
     throw new Error("--vector-dimension is required for an unknown model.");
   }

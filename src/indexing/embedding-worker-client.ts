@@ -1,8 +1,10 @@
 import type {
+  EmbeddingVectorBatch,
   EmbeddingWorkerConfig,
   EmbeddingWorkerRequest,
   EmbeddingWorkerResponse,
 } from "./embedding-protocol.ts";
+import { validateEmbeddingVectorBatch } from "./embedding-protocol.ts";
 
 interface PendingRequest {
   readonly resolve: (response: EmbeddingWorkerResponse) => void;
@@ -52,12 +54,16 @@ export class EmbeddingWorkerClient {
       config,
     });
     this.#expectKind(response, "ready");
+    if (
+      response.modelId !== config.modelId ||
+      response.revision !== config.revision ||
+      response.profileVersion !== config.profileVersion
+    ) {
+      throw new Error("The embedding Worker initialized an unexpected model profile.");
+    }
   }
 
-  async embed(
-    texts: readonly string[],
-    maximumTokens?: number,
-  ): Promise<readonly (readonly number[])[]> {
+  async embed(texts: readonly string[], maximumTokens?: number): Promise<EmbeddingVectorBatch> {
     const response = await this.#request({
       kind: "embed",
       requestId: crypto.randomUUID(),
@@ -65,7 +71,12 @@ export class EmbeddingWorkerClient {
       ...(maximumTokens ? { maximumTokens } : {}),
     });
     this.#expectKind(response, "embeddings");
-    return response.vectors;
+    validateEmbeddingVectorBatch(response);
+    return {
+      count: response.count,
+      dimension: response.dimension,
+      storage: response.storage,
+    };
   }
 
   async close(): Promise<void> {

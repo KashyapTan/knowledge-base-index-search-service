@@ -20,8 +20,13 @@ import {
   DEFAULT_PORT,
   DEFAULT_SOURCE_ROOT,
   SUPPORTED_EMBEDDING_DEVICES,
-  SUPPORTED_QUANTIZATIONS,
 } from "./defaults.ts";
+import {
+  embeddingConfigFromProfile,
+  findEmbeddingModelProfile,
+  resolveProfileDevice,
+  validateEmbeddingModelProfile,
+} from "./embedding-profiles.ts";
 import {
   canonicalizeSourceRoot,
   createRootIdentity,
@@ -359,21 +364,36 @@ export async function loadAppConfig(
       file.value.stateDir ??
       platformDirectories.value.stateDir,
     vectorDimension:
-      cli.value.vectorDimension ??
-      environment.vectorDimension ??
-      file.value.vectorDimension ??
-      DEFAULT_EMBEDDING_CONFIG.vectorDimension,
+      cli.value.vectorDimension ?? environment.vectorDimension ?? file.value.vectorDimension,
   };
 
   const port = parseInteger(merged.port, "port", { min: 1, max: 65_535 });
   if (!port.ok) return port;
-  const vectorDimension = parseInteger(merged.vectorDimension, "vectorDimension", {
-    min: 1,
-    max: 65_536,
-  });
-  if (!vectorDimension.ok) return vectorDimension;
   const modelId = nonEmpty(merged.modelId, "modelId");
   if (!modelId.ok) return modelId;
+  const profile = findEmbeddingModelProfile(modelId.value);
+  if (!profile) {
+    return err({
+      code: "CONFIG_VALUE_INVALID",
+      message: `No reviewed local embedding profile is registered for ${modelId.value}. Choose a model listed by bun run config.`,
+      details: { setting: "modelId" },
+    });
+  }
+  const profileIssues = validateEmbeddingModelProfile(profile);
+  if (profileIssues.length > 0) {
+    return err({
+      code: "CONFIG_VALUE_INVALID",
+      message: `The reviewed embedding profile is invalid: ${profileIssues.join("; ")}.`,
+      details: { setting: "modelId" },
+    });
+  }
+  if (!profile.license.eligibleForTeamUse) {
+    return err({
+      code: "CONFIG_VALUE_INVALID",
+      message: `The ${profile.license.identifier} license is not eligible for the intended team use.`,
+      details: { setting: "modelId" },
+    });
+  }
   const requestedDevice = nonEmpty(merged.embeddingDevice, "embeddingDevice");
   if (!requestedDevice.ok) return requestedDevice;
   if (!SUPPORTED_EMBEDDING_DEVICES.has(requestedDevice.value as ConfiguredEmbeddingDevice)) {
@@ -383,22 +403,49 @@ export async function loadAppConfig(
       details: { setting: "embeddingDevice" },
     });
   }
-  const device =
-    requestedDevice.value === "auto"
-      ? platform === "darwin" && architecture === "arm64"
-        ? "webgpu"
-        : "cpu"
-      : (requestedDevice.value as EmbeddingConfig["device"]);
-  const quantization = nonEmpty(
-    merged.quantization ?? (device === "webgpu" ? "fp16" : DEFAULT_EMBEDDING_CONFIG.quantization),
-    "quantization",
+  const device = resolveProfileDevice(
+    profile,
+    requestedDevice.value as ConfiguredEmbeddingDevice,
+    platform,
+    architecture,
   );
-  if (!quantization.ok) return quantization;
-  if (!SUPPORTED_QUANTIZATIONS.has(quantization.value as DataType)) {
+  if (!device) {
     return err({
       code: "CONFIG_VALUE_INVALID",
-      message: "quantization is not supported by the local embedding runtime.",
+      message: `${profile.canonicalModelId} does not have a verified ${requestedDevice.value} execution profile.`,
+      details: { setting: "embeddingDevice" },
+    });
+  }
+  const execution = profile.execution[device];
+  if (!execution) {
+    return err({
+      code: "CONFIG_VALUE_INVALID",
+      message: `${profile.canonicalModelId} cannot run on ${device}.`,
+      details: { setting: "embeddingDevice" },
+    });
+  }
+  const quantization = nonEmpty(merged.quantization ?? execution.defaultDtype, "quantization");
+  if (!quantization.ok) return quantization;
+  if (!execution.dtypes.includes(quantization.value as DataType)) {
+    return err({
+      code: "CONFIG_VALUE_INVALID",
+      message: `${profile.canonicalModelId} on ${device} supports these dtypes: ${execution.dtypes.join(", ")}.`,
       details: { setting: "quantization" },
+    });
+  }
+  const vectorDimension =
+    merged.vectorDimension === undefined
+      ? ok(profile.nativeDimension)
+      : parseInteger(merged.vectorDimension, "vectorDimension", {
+          min: 1,
+          max: 65_536,
+        });
+  if (!vectorDimension.ok) return vectorDimension;
+  if (!profile.matryoshkaDimensions.includes(vectorDimension.value)) {
+    return err({
+      code: "CONFIG_VALUE_INVALID",
+      message: `${profile.canonicalModelId} supports these output dimensions: ${profile.matryoshkaDimensions.join(", ")}.`,
+      details: { setting: "vectorDimension" },
     });
   }
   if (merged.normalization !== "l2") {
@@ -416,13 +463,12 @@ export async function loadAppConfig(
   const sourceRoot = await canonicalizeSourceRoot(merged.root, { cwd, homeDir });
   if (!sourceRoot.ok) return sourceRoot;
   const rootIdentity = createRootIdentity(sourceRoot.value);
-  const embedding: EmbeddingConfig = {
+  const embedding: EmbeddingConfig = embeddingConfigFromProfile(
+    profile,
     device,
-    modelId: modelId.value,
-    normalization: "l2",
-    quantization: quantization.value as DataType,
-    vectorDimension: vectorDimension.value,
-  };
+    quantization.value as DataType,
+    vectorDimension.value,
+  );
   const compatibility = createIndexCompatibility({
     embedding,
     index: DEFAULT_INDEX_CONFIG,
@@ -436,7 +482,13 @@ export async function loadAppConfig(
     applicationCacheDir: cacheDir.value,
     applicationStateDir: stateDir.value,
     compatibilityNamespaceInput: compatibilityNamespaceInput(compatibility),
-    modelNamespaceInput: JSON.stringify(embedding),
+    modelNamespaceInput: JSON.stringify({
+      device: embedding.device,
+      dtype: embedding.quantization,
+      modelId: embedding.modelId,
+      profileVersion: embedding.profile.profileVersion,
+      revision: embedding.profile.revision,
+    }),
     projectDir: options.projectDir ?? resolve(import.meta.dir, "../.."),
     rootIdentity,
     sourceRoot: sourceRoot.value,

@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import type { EmbeddingProfileCompatibility } from "../config/index.ts";
 import { err, ok, type Result } from "../shared/result.ts";
 import type {
   EmbeddingError,
@@ -12,6 +13,32 @@ export interface FakeEmbeddingProviderOptions {
   readonly batchSize?: number;
   readonly failWarmUp?: boolean;
   readonly failOnText?: string;
+}
+
+export function fakeEmbeddingProfile(id = "deterministic-fake"): EmbeddingProfileCompatibility {
+  return {
+    assetProvenance: "deterministic-test-fixture",
+    documentEncoding: { id: `${id}-document`, prefix: "", suffix: "", version: 1 },
+    license: "test-only",
+    pooling: {
+      modelOutputNormalized: false,
+      outputTensor: "last_hidden_state",
+      strategy: "mean",
+      version: 1,
+    },
+    profileVersion: 1,
+    queryEncoding: { id: `${id}-query`, prefix: "", suffix: "", version: 1 },
+    revision: createHash("sha1").update(id).digest("hex"),
+    tokenizer: {
+      addSpecialTokens: true,
+      paddingSide: "right",
+      promptTokenOverhead: { document: 2, query: 2 },
+      specialTokenPolicyVersion: 1,
+      truncation: "longest-first",
+      truncationSide: "right",
+      version: 1,
+    },
+  };
 }
 
 function deterministicVector(text: string, dimension: number): readonly number[] {
@@ -43,6 +70,8 @@ export class FakeEmbeddingProvider implements EmbeddingProvider {
     this.identity = {
       device: "cpu",
       modelId: "kbiss/deterministic-fake",
+      nativeDimension: options.dimension ?? 4,
+      profile: fakeEmbeddingProfile(),
       quantization: "fp32",
       vectorDimension: options.dimension ?? 4,
       maximumTokens: 512,

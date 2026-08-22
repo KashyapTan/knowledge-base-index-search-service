@@ -3,7 +3,7 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import * as lancedb from "@lancedb/lancedb";
-import type { IndexedChunkRecord, IndexedFileRecord } from "./contracts.ts";
+import type { EmbeddingVector, IndexedChunkRecord, IndexedFileRecord } from "./contracts.ts";
 import { CHUNKS_TABLE, openLanceIndex } from "./lance-store.ts";
 import { indexableFile, indexingConfig } from "./test-helpers.ts";
 
@@ -50,7 +50,7 @@ function fileRecord(contentHash = "hash-one"): IndexedFileRecord {
 function chunkRecord(
   chunkId = "chunk-1",
   text = "searchable text",
-  vector: readonly number[] = [1, 0, 0, 0],
+  vector: EmbeddingVector = [1, 0, 0, 0],
 ): IndexedChunkRecord {
   return {
     chunkId,
@@ -89,7 +89,9 @@ describe("LanceDB index storage", () => {
     const opened = await openLanceIndex(config);
     expect(opened.ok).toBe(true);
     if (!opened.ok) return;
-    const stored = await opened.value.replaceFile(fileRecord(), [chunkRecord()]);
+    const stored = await opened.value.replaceFile(fileRecord(), [
+      chunkRecord("chunk-1", "searchable text", Float32Array.from([1, 0, 0, 0])),
+    ]);
     if (!stored.ok) throw new Error(JSON.stringify(stored.error));
     expect(stored.ok).toBe(true);
     expect(await opened.value.getFile("file-1")).toEqual({ ok: true, value: fileRecord() });

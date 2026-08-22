@@ -33,25 +33,19 @@ describe("integrated incremental search release path", () => {
     try {
       await cp(source, root, { recursive: true });
       const loaded = await loadAppConfig({
-        argv: [
-          "--root",
-          root,
-          "--model",
-          embeddings.identity.modelId,
-          "--embedding-device",
-          embeddings.identity.device,
-          "--quantization",
-          embeddings.identity.quantization,
-          "--vector-dimension",
-          String(embeddings.identity.vectorDimension),
-        ],
+        argv: ["--root", root],
         env: {
           KBISS_STATE_DIR: join(temporary, "state"),
           KBISS_CACHE_DIR: join(temporary, "cache"),
         },
         projectDir: resolve(import.meta.dir, "../.."),
       });
-      const config = expectOk(loaded);
+      const baseConfig = expectOk(loaded);
+      const config = {
+        ...baseConfig,
+        embedding: embeddings.config,
+        compatibility: { ...baseConfig.compatibility, embedding: embeddings.config },
+      };
       const discovery = expectOk(await createDiscoveryService(config));
       store = expectOk(await openLanceIndex(config));
       const extraction = createExtractionPipeline(
@@ -136,25 +130,19 @@ describe("integrated incremental search release path", () => {
       ].join("\n");
       await writeFile(join(root, relativePath), source);
       const loaded = await loadAppConfig({
-        argv: [
-          "--root",
-          root,
-          "--model",
-          embeddings.identity.modelId,
-          "--embedding-device",
-          embeddings.identity.device,
-          "--quantization",
-          embeddings.identity.quantization,
-          "--vector-dimension",
-          String(embeddings.identity.vectorDimension),
-        ],
+        argv: ["--root", root],
         env: {
           KBISS_STATE_DIR: join(temporary, "state"),
           KBISS_CACHE_DIR: join(temporary, "cache"),
         },
         projectDir: resolve(import.meta.dir, "../.."),
       });
-      const config = expectOk(loaded);
+      const baseConfig = expectOk(loaded);
+      const config = {
+        ...baseConfig,
+        embedding: embeddings.config,
+        compatibility: { ...baseConfig.compatibility, embedding: embeddings.config },
+      };
       const discovery = expectOk(await createDiscoveryService(config));
       const scan = expectOk(await discovery.scanner.scan("scan"));
       const file = scan.files.find((candidate) => candidate.relativePath === relativePath);

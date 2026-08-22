@@ -2,8 +2,8 @@ import type { EmbeddingWorkerRequest, EmbeddingWorkerResponse } from "../embeddi
 
 declare const self: Worker;
 
-function post(response: EmbeddingWorkerResponse): void {
-  self.postMessage(response);
+function post(response: EmbeddingWorkerResponse, transfer: readonly Transferable[] = []): void {
+  self.postMessage(response, [...transfer]);
 }
 
 self.onmessage = (event: MessageEvent<EmbeddingWorkerRequest>) => {
@@ -14,16 +14,24 @@ self.onmessage = (event: MessageEvent<EmbeddingWorkerRequest>) => {
         kind: "ready",
         requestId: request.requestId,
         modelId: request.config.modelId,
+        profileVersion: request.config.profileVersion,
+        revision: request.config.revision,
       });
       break;
     case "embed":
       setTimeout(() => {
-        post({
-          kind: "embeddings",
-          requestId: request.requestId,
-          vectors: request.texts.map(() => [1, 0]),
-          dimension: 2,
-        });
+        const storage = new Float32Array(request.texts.length * 2);
+        for (let index = 0; index < request.texts.length; index += 1) storage[index * 2] = 1;
+        post(
+          {
+            kind: "embeddings",
+            requestId: request.requestId,
+            count: request.texts.length,
+            dimension: 2,
+            storage,
+          },
+          [storage.buffer],
+        );
       }, 20);
       break;
     case "shutdown":

@@ -1,10 +1,34 @@
 import type { PreTrainedTokenizer } from "@huggingface/transformers";
+import { composeEmbeddingInput, type EmbeddingEncodingConfig } from "../config/index.ts";
 import type { TokenCounter } from "./contracts.ts";
 
-export function createTransformersTokenCounter(tokenizer: PreTrainedTokenizer): TokenCounter {
+export interface TransformersTokenCounterOptions {
+  readonly addSpecialTokens?: boolean;
+  readonly encoding?: EmbeddingEncodingConfig;
+  readonly expectedPromptTokenOverhead?: number;
+}
+
+export function createTransformersTokenCounter(
+  tokenizer: PreTrainedTokenizer,
+  options: TransformersTokenCounterOptions = {},
+): TokenCounter {
+  const encoding = options.encoding ?? { id: "identity", prefix: "", suffix: "", version: 1 };
+  const addSpecialTokens = options.addSpecialTokens ?? true;
+  if (options.expectedPromptTokenOverhead !== undefined) {
+    const actual = tokenizer.encode(composeEmbeddingInput(encoding, ""), {
+      add_special_tokens: addSpecialTokens,
+    }).length;
+    if (actual !== options.expectedPromptTokenOverhead) {
+      throw new TypeError(
+        `The tokenizer prompt overhead changed: expected ${options.expectedPromptTokenOverhead}, received ${actual}.`,
+      );
+    }
+  }
   return {
     count(text: string): number {
-      return tokenizer.encode(text, { add_special_tokens: true }).length;
+      return tokenizer.encode(composeEmbeddingInput(encoding, text), {
+        add_special_tokens: addSpecialTokens,
+      }).length;
     },
   };
 }

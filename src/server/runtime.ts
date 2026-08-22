@@ -1,13 +1,7 @@
 import { basename } from "node:path";
-import { AutoTokenizer } from "@huggingface/transformers";
 import type { AppConfig, StartupIssue, StartupStateStore } from "../config/index.ts";
 import { createDiscoveryService, type FileChange } from "../discovery/index.ts";
-import {
-  createTransformersTokenCounter,
-  createWorkerExtractionPipeline,
-  type ExtractionPipeline,
-  type TokenCounter,
-} from "../extraction/index.ts";
+import { createWorkerExtractionPipeline, type ExtractionPipeline } from "../extraction/index.ts";
 import {
   createIndexingService,
   createTransformersEmbeddingProvider,
@@ -44,15 +38,10 @@ function serviceFailure(error: {
 
 export interface ProductionServiceAdapters {
   createEmbeddings(config: AppConfig): EmbeddingProvider;
-  loadTokenCounter(config: AppConfig): Promise<TokenCounter>;
   openStore(config: AppConfig): Promise<Result<IndexStore, AppError>>;
   openRetriever(config: AppConfig): Promise<Result<CandidateRetriever, AppError>>;
   createDiscovery(config: AppConfig): Promise<Result<ApplicationServices["discovery"], AppError>>;
-  createExtraction(
-    config: AppConfig,
-    tokenizer: TokenCounter,
-    maxTokens: number,
-  ): ExtractionPipeline;
+  createExtraction(config: AppConfig, maxTokens: number): ExtractionPipeline;
   createIndexing(
     config: AppConfig,
     dependencies: {
@@ -70,19 +59,10 @@ export interface ProductionServiceAdapters {
 /* c8 ignore start -- Thin production adapters are covered by their owning Plan 3-6 suites. */
 const productionAdapters: ProductionServiceAdapters = {
   createEmbeddings: createTransformersEmbeddingProvider,
-  /* c8 ignore next 6 -- Real tokenizer loading requires the opt-in local model-assets suite. */
-  async loadTokenCounter(config) {
-    const tokenizer = await AutoTokenizer.from_pretrained(config.embedding.modelId, {
-      cache_dir: config.paths.modelCacheDir,
-      local_files_only: true,
-    });
-    return createTransformersTokenCounter(tokenizer);
-  },
   openStore: openLanceIndex,
   openRetriever: openLanceCandidateRetriever,
   createDiscovery: createDiscoveryService,
-  createExtraction: (config, _tokenizer, maxTokens) =>
-    createWorkerExtractionPipeline(config, maxTokens),
+  createExtraction: createWorkerExtractionPipeline,
   createIndexing: createIndexingService,
   createSearch: createSearchService,
 };
@@ -108,7 +88,6 @@ export async function createProductionServices(
       recoverCorruptAssets: !config.offline,
     });
     if (!warm.ok) return serviceFailure(warm.error);
-    const tokenizer = await adapters.loadTokenCounter(config);
     if (signal.aborted) {
       return serviceFailure({ code: "STARTUP_CANCELLED", message: "Startup was cancelled." });
     }
@@ -127,7 +106,7 @@ export async function createProductionServices(
       store.close();
       return serviceFailure(discovery.error);
     }
-    extraction = adapters.createExtraction(config, tokenizer, embeddings.identity.maximumTokens);
+    extraction = adapters.createExtraction(config, embeddings.identity.maximumTokens);
     const indexing = adapters.createIndexing(config, { extraction, embeddings, store });
     const activeRetriever = retriever;
     completed = true;

@@ -3,13 +3,15 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import * as lancedb from "@lancedb/lancedb";
-import { PROVISIONAL_EMBEDDING_MODEL } from "../src/indexing/embedding-protocol.ts";
+import { EMBEDDING_MODEL_PROFILES } from "../src/config/index.ts";
+import { PROVISIONAL_EMBEDDING_MODEL, vectorViews } from "../src/indexing/embedding-protocol.ts";
 import { EmbeddingWorkerClient } from "../src/indexing/embedding-worker-client.ts";
 import { createFoundationServer } from "../src/server/index.ts";
 
 const HEALTH_RESPONSE_DEADLINE_MS = 5_000;
 const NORMALIZATION_TOLERANCE = 0.001;
 const REQUIRED_BUN_VERSION = "1.4.0";
+const profile = EMBEDDING_MODEL_PROFILES["Xenova/bge-small-en-v1.5"];
 
 interface HealthProbe {
   readonly elapsedMilliseconds: number;
@@ -57,8 +59,10 @@ async function verifyLanceDb(databaseDirectory: string): Promise<void> {
   }
 }
 
-function vectorNorm(vector: readonly number[]): number {
-  return Math.sqrt(vector.reduce((sum, value) => sum + value * value, 0));
+function vectorNorm(vector: Iterable<number>): number {
+  let squared = 0;
+  for (const value of vector) squared += value * value;
+  return Math.sqrt(squared);
 }
 
 async function main(): Promise<void> {
@@ -85,12 +89,20 @@ async function main(): Promise<void> {
     console.info("✓ Bun.serve returned the compiled Vite entry asset");
 
     const initialization = worker.initialize({
+      cacheDir: join(compatibilityDirectory, "models"),
       device: "cpu",
+      documentEncoding: profile.documentEncoding,
       modelId: PROVISIONAL_EMBEDDING_MODEL.id,
       dtype: PROVISIONAL_EMBEDDING_MODEL.dtype,
       expectedDimension: PROVISIONAL_EMBEDDING_MODEL.dimension,
-      cacheDir: join(compatibilityDirectory, "models"),
       localFilesOnly: false,
+      maximumTokens: profile.applicationIndexingLimit,
+      nativeDimension: profile.nativeDimension,
+      pooling: profile.pooling,
+      profileVersion: profile.profileVersion,
+      queryEncoding: profile.queryEncoding,
+      revision: profile.revision,
+      tokenizer: profile.tokenizer,
     });
     const healthWhileLoading = await probeHealth(server.url);
     await initialization;
@@ -103,7 +115,7 @@ async function main(): Promise<void> {
       "Exact identifiers and semantic questions should both work.",
     ]);
     const healthWhileEmbedding = await probeHealth(server.url);
-    const vectors = await inference;
+    const vectors = vectorViews(await inference);
 
     assert.equal(vectors.length, 2);
     for (const vector of vectors) {

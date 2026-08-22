@@ -1,4 +1,5 @@
-import { AutoTokenizer } from "@huggingface/transformers";
+import { join } from "node:path";
+import { AutoTokenizer, env } from "@huggingface/transformers";
 import type { ExtractionPipeline } from "./contracts.ts";
 import { createExtractionPipeline } from "./service.ts";
 import { createTransformersTokenCounter } from "./tokenizer.ts";
@@ -18,16 +19,29 @@ self.onmessage = (event: MessageEvent<ExtractionWorkerRequest>) => {
     case "initialize":
       void (async () => {
         try {
+          const embedding = request.config.config.embedding;
+          env.allowLocalModels = true;
+          env.allowRemoteModels = false;
           const tokenizer = await AutoTokenizer.from_pretrained(
-            request.config.config.embedding.modelId,
+            join(
+              request.config.config.paths.modelCacheDir,
+              ...embedding.modelId.split("/"),
+              embedding.profile.revision,
+            ),
             {
-              cache_dir: request.config.config.paths.modelCacheDir,
               local_files_only: true,
             },
           );
+          if (tokenizer.padding_side !== embedding.profile.tokenizer.paddingSide) {
+            throw new TypeError("The cached tokenizer padding policy does not match its profile.");
+          }
           pipeline = createExtractionPipeline(
             request.config.config,
-            createTransformersTokenCounter(tokenizer),
+            createTransformersTokenCounter(tokenizer, {
+              addSpecialTokens: embedding.profile.tokenizer.addSpecialTokens,
+              encoding: embedding.profile.documentEncoding,
+              expectedPromptTokenOverhead: embedding.profile.tokenizer.promptTokenOverhead.document,
+            }),
             request.config.maximumTokens,
           );
           post({ kind: "ready", requestId: request.requestId });

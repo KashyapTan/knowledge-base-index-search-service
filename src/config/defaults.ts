@@ -1,9 +1,14 @@
 import type { DataType } from "@huggingface/transformers";
 import type { ConfiguredEmbeddingDevice, EmbeddingConfig, IndexConfig } from "./contracts.ts";
+import {
+  DEFAULT_EMBEDDING_MODEL_ID,
+  EMBEDDING_MODEL_PROFILES,
+  embeddingConfigFromProfile,
+} from "./embedding-profiles.ts";
 
 export const APPLICATION_NAME = "kbiss";
 export const APPLICATION_VERSION = "0.1.0";
-export const COMPATIBILITY_DESCRIPTOR_VERSION = 2;
+export const COMPATIBILITY_DESCRIPTOR_VERSION = 3;
 export const DEFAULT_PORT = 3210;
 export const DEFAULT_SOURCE_ROOT = "~/dev/card-gateway-artifacts";
 /**
@@ -258,11 +263,12 @@ export const SUPPORTED_EMBEDDING_DEVICES: ReadonlySet<ConfiguredEmbeddingDevice>
 
 /** Concrete compatibility baseline. Runtime configuration selects WebGPU/fp16 on Apple Silicon. */
 export const DEFAULT_EMBEDDING_CONFIG = Object.freeze({
-  device: "cpu",
-  modelId: "Xenova/bge-small-en-v1.5",
-  normalization: "l2",
-  quantization: "q8",
-  vectorDimension: 384,
+  ...embeddingConfigFromProfile(
+    EMBEDDING_MODEL_PROFILES[DEFAULT_EMBEDDING_MODEL_ID],
+    "cpu",
+    "q8",
+    384,
+  ),
 } as const satisfies EmbeddingConfig);
 
 export const DEFAULT_EMBEDDING_DEVICE: ConfiguredEmbeddingDevice = "auto";
