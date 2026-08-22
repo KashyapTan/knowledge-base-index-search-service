@@ -111,3 +111,12 @@ Plan 05 consumes the chunk contracts, produces local embeddings, and persists fi
   target.
 - The complete public API, tokenizer expectation, safety boundary, field semantics, and Plan 5
   handoff are recorded in `docs/plan-04-text-extraction.md`.
+
+## Post-release regression fix (2026-08-22)
+
+- Fixed oversized-unit splitting so reaching the unit end terminates overlap generation. Version 1
+  could emit progressively shorter suffix fragments and merge them into malformed searchable/display
+  chunks.
+- Added a regression invariant requiring every split display chunk to remain a contiguous source
+  excerpt and retain the final source token without synthetic suffixes.
+- Bumped the default chunker compatibility version to 2 so affected local indexes require a rebuild.

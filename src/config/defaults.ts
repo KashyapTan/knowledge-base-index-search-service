@@ -259,7 +259,7 @@ export const DEFAULT_EMBEDDING_CONFIG = Object.freeze({
 export const DEFAULT_INDEX_CONFIG: IndexConfig = Object.freeze({
   chunkOverlapTokens: 50,
   chunkSizeTokens: 400,
-  chunkerVersion: 1,
+  chunkerVersion: 2,
   extractorVersion: 1,
   schemaVersion: 1,
 });

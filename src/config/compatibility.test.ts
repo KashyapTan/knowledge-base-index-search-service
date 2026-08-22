@@ -86,7 +86,10 @@ describe("compatibility classification", () => {
     ["extractor", (value: IndexCompatibility) => ({ ...value, extractorVersion: 2 })],
     [
       "chunker",
-      (value: IndexCompatibility) => ({ ...value, chunking: { ...value.chunking, version: 2 } }),
+      (value: IndexCompatibility) => ({
+        ...value,
+        chunking: { ...value.chunking, version: value.chunking.version + 1 },
+      }),
     ],
     [
       "chunk size",

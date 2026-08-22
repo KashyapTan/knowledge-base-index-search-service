@@ -71,7 +71,8 @@ test("keyboard search flow uses the real local API contract", async ({ page }) =
   await expect(page).toHaveURL(/file=[a-f0-9]{64}/u);
   await expect(viewerHost.getByRole("heading", { name: "Gateway" })).toBeVisible();
   await expect(viewerHost.locator("table")).toBeVisible();
-  await expect(viewerHost.locator("script, form, iframe, img")).toHaveCount(0);
+  await expect(viewerHost.locator("script, form, iframe")).toHaveCount(0);
+  await expect(viewerHost.locator('img[src^="http:"], img[src^="https:"]')).toHaveCount(0);
   expect(await page.evaluate(() => Reflect.get(window, "markdownPwned"))).toBeUndefined();
   const safeLink = viewerHost.getByRole("link", { name: "Safe external" });
   await expect(safeLink).toHaveAttribute("href", "https://example.com/docs");

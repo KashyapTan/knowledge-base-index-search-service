@@ -113,4 +113,73 @@ describe("integrated incremental search release path", () => {
       await rm(temporary, { recursive: true, force: true });
     }
   });
+
+  test("persists and searches only contiguous excerpts from an oversized fallback unit", async () => {
+    const temporary = await mkdtemp(join(tmpdir(), "kbiss-integrated-chunk-regression-"));
+    const root = join(temporary, "source");
+    const embeddings = new FixtureSemanticEmbeddingProvider();
+    let store: LanceIndexStore | undefined;
+    let retriever: LanceCandidateRetriever | undefined;
+    try {
+      await mkdir(root, { recursive: true });
+      const relativePath = "QuarterlyStatusCalculator.java";
+      const source = [
+        "public final class QuarterlyStatusCalculator {",
+        ...Array.from(
+          { length: 90 },
+          (_, index) =>
+            `  private final java.math.BigDecimal quarterlyValue${index} = java.math.BigDecimal.valueOf(${index});`,
+        ),
+        "}",
+      ].join("\n");
+      await writeFile(join(root, relativePath), source);
+      const loaded = await loadAppConfig({
+        argv: [
+          "--root",
+          root,
+          "--model",
+          embeddings.identity.modelId,
+          "--quantization",
+          embeddings.identity.quantization,
+          "--vector-dimension",
+          String(embeddings.identity.vectorDimension),
+        ],
+        env: {
+          KBISS_STATE_DIR: join(temporary, "state"),
+          KBISS_CACHE_DIR: join(temporary, "cache"),
+        },
+        projectDir: resolve(import.meta.dir, "../.."),
+      });
+      const config = expectOk(loaded);
+      const discovery = expectOk(await createDiscoveryService(config));
+      const scan = expectOk(await discovery.scanner.scan("scan"));
+      const file = scan.files.find((candidate) => candidate.relativePath === relativePath);
+      expect(file?.format).toBe("text");
+      store = expectOk(await openLanceIndex(config));
+      const extraction = createExtractionPipeline(
+        config,
+        createUnicodeWordTokenCounter(),
+        embeddings.identity.maximumTokens,
+      );
+      const indexing = createIndexingService(config, { extraction, embeddings, store });
+      const indexed = expectOk(await indexing.indexFiles(scan.files));
+      expect(indexed.progress.failedFiles).toBe(0);
+      const chunks = expectOk(await store.getChunks(file?.fileId ?? "missing"));
+      expect(chunks.length).toBeGreaterThan(1);
+      expect(chunks.every((chunk) => source.includes(chunk.displayText))).toBeTrue();
+
+      retriever = expectOk(await openLanceCandidateRetriever(config));
+      const search = createSearchService({ embeddings, retriever });
+      const response = expectOk(await search.search({ query: "calculator", fileCount: 5 }));
+      const result = response.results.find((candidate) => candidate.relativePath === relativePath);
+      expect(result).toBeDefined();
+      expect(result?.excerpts.length).toBeGreaterThan(0);
+      expect(result?.excerpts.every((excerpt) => source.includes(excerpt.text))).toBeTrue();
+    } finally {
+      retriever?.close();
+      store?.close();
+      await embeddings.shutdown();
+      await rm(temporary, { recursive: true, force: true });
+    }
+  });
 });

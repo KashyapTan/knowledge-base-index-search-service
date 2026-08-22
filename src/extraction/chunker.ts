@@ -66,6 +66,7 @@ function largestFittingEnd(
     }
   }
   if (best === start) return Math.min(text.length, start + 1);
+  if (best === text.length) return best;
   const preferred = text.slice(start, best).search(/\s+\S*$/u);
   return preferred > Math.floor((best - start) * 0.6) ? start + preferred : best;
 }
@@ -131,6 +132,7 @@ function splitUnit(
       headingTrail: unit.headingTrail,
       symbols: unit.symbol ? [unit.symbol] : [],
     });
+    if (end >= unit.searchText.length) break;
     const nextStart = overlapStart(
       unit.searchText,
       searchStart,

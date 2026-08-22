@@ -75,6 +75,11 @@ ID, semantic location (line range, headings, symbols), and content hash. Identic
 configuration therefore reproduce identical chunks and IDs, while content or semantic-location
 changes invalidate the affected identity.
 
+Chunker version 2 fixes end-of-unit overlap termination. Once a split fragment reaches the end of
+an oversized semantic unit, chunking stops instead of repeatedly reprocessing progressively shorter
+suffixes. The version bump makes existing version-1 indexes incompatible so a controlled rebuild
+replaces already-persisted malformed display text, BM25 input, and embeddings.
+
 ## Plan 5 handoff
 
 Plan 5 should consume only successful `ExtractedFile` results. Store `SearchChunk` fields directly

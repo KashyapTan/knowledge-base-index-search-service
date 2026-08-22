@@ -103,8 +103,8 @@ export function searchChunk(
     symbols: [],
     contentHash: createHash("sha256").update(text).digest("hex"),
     tokenCount: text.split(/\s+/u).length,
-    extractorVersion: 1,
-    chunkerVersion: 1,
+    extractorVersion: DEFAULT_INDEX_CONFIG.extractorVersion,
+    chunkerVersion: DEFAULT_INDEX_CONFIG.chunkerVersion,
   };
 }
 
@@ -122,7 +122,7 @@ export function extracted(file: DiscoveredFile, chunks: readonly SearchChunk[]):
       },
       units: [],
       warnings: [],
-      extractorVersion: 1,
+      extractorVersion: DEFAULT_INDEX_CONFIG.extractorVersion,
     },
     chunks,
   };

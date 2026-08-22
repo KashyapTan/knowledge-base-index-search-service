@@ -45,6 +45,8 @@ describe("structure-aware chunking", () => {
     const chunks = chunkDocument(document, options());
     expect(chunks.length).toBeGreaterThan(5);
     expect(chunks.every((chunk) => chunk.tokenCount <= 52)).toBeTrue();
+    expect(chunks.every((chunk) => words.includes(chunk.displayText))).toBeTrue();
+    expect(chunks.at(-1)?.displayText.endsWith("token219")).toBeTrue();
     for (let index = 1; index < chunks.length; index += 1) {
       const previousWords = chunks[index - 1]?.displayText.split(/\s+/u) ?? [];
       const currentWords = new Set(chunks[index]?.displayText.split(/\s+/u));
