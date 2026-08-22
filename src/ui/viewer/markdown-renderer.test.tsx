@@ -85,4 +85,22 @@ plain safe code
     );
     expect(container.querySelector("mark")).toBeNull();
   });
+
+  test("renders and highlights nested lists without recursively re-wrapping the subtree", () => {
+    const content = `- **Three-tier routing**
+  1. **Global messages** are applied regardless of tab
+  2. **Active tab messages** update live state
+  3. **Background tab messages** update saved state
+`;
+    const { container } = render(
+      <MarkdownPreview
+        content={content}
+        grep={{ query: "messages", regex: false, caseSensitive: false }}
+      />,
+    );
+
+    expect(container.querySelectorAll("li")).toHaveLength(4);
+    expect(container.querySelectorAll("mark")).toHaveLength(3);
+    expect(container.textContent).toContain("Background tab messages");
+  });
 });

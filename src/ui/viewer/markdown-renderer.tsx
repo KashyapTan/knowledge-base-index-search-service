@@ -71,6 +71,10 @@ function HighlightedChildren({
   readonly children: ReactNode;
   readonly grep: GrepOptions;
 }) {
+  // Avoid walking and cloning the Markdown tree when highlighting is inactive. Besides being much
+  // cheaper for documentation-sized files, this keeps ordinary preview rendering independent of
+  // the shape and nesting depth of the parsed Markdown.
+  if (!grep.query || grep.regex) return children;
   return Children.map(children, (child) => {
     if (typeof child === "string") return highlightedString(child, grep);
     if (
@@ -79,6 +83,10 @@ function HighlightedChildren({
     ) {
       return child;
     }
+    // A custom ReactMarkdown component (notably a nested list item) may receive a subtree that this
+    // component already wrapped. Re-wrapping that marker recursively creates HighlightedChildren
+    // inside itself until Firefox exhausts the stack and stops processing Close/Escape events.
+    if (child.type === HighlightedChildren) return child;
     return cloneElement(
       child,
       undefined,

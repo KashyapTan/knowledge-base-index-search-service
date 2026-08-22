@@ -62,13 +62,32 @@ describe("viewer sanitization", () => {
     expect(sanitizeDiagramSvg("not svg")).toBe("");
     const safe = sanitizeDiagramSvg(`<svg xmlns="http://www.w3.org/2000/svg" onload="alert(1)">
       <script>alert(1)</script><foreignObject><div>bad</div></foreignObject>
+      <style>.safe { fill: #4f46e5; } .bad { fill: url(https://bad.invalid/fill); }</style>
       <a href="javascript:alert(1)"><text>bad</text></a>
-      <path marker-end="url(#arrow)" style="fill:url(https://bad)" />
+      <path marker-end="url(#arrow)" style="fill:url(https://bad.invalid/fill)" />
     </svg>`);
     expect(safe).not.toContain("script");
     expect(safe).not.toContain("foreignObject");
     expect(safe).not.toContain("onload");
     expect(safe).not.toContain("javascript:");
-    expect(safe).not.toContain("https://bad");
+    expect(safe).not.toContain("https://bad.invalid");
+
+    const styled = sanitizeDiagramSvg(`<svg xmlns="http://www.w3.org/2000/svg">
+      <style>.node { fill: #4f46e5; } .edge { marker-end: url(#arrow); }</style>
+      <rect class="node" width="10" height="10" />
+    </svg>`);
+    expect(styled).toContain("fill: #4f46e5");
+    expect(styled).toContain("url(#arrow)");
+
+    const cylinder = sanitizeDiagramSvg(`<svg xmlns="http://www.w3.org/2000/svg">
+      <g class="node" id="database">
+        <path class="basic label-container" d="M0,15.8 a107.2,15.8 0,0,0 214.4,0 l0,66" />
+        <g class="label" transform="translate(-99.7, -8.8)">
+          <text><tspan class="text-outer-tspan">SQLite</tspan><tspan class="text-outer-tspan">Messages</tspan></text>
+        </g>
+      </g>
+    </svg>`);
+    expect(cylinder).toContain('transform="translate(0, -8.8)"');
+    expect(cylinder).toContain('text-anchor="middle"');
   });
 });
