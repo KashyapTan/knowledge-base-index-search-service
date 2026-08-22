@@ -1,10 +1,12 @@
 import { createHash } from "node:crypto";
+import type { EmbeddingConfig } from "../config/index.ts";
 import type {
   EmbeddingError,
   EmbeddingIdentity,
   EmbeddingProvider,
   EmbedOptions,
 } from "../indexing/index.ts";
+import { fakeEmbeddingProfile } from "../indexing/index.ts";
 import { err, ok, type Result } from "../shared/result.ts";
 
 const DIMENSION = 32;
@@ -45,14 +47,16 @@ function vectorFor(text: string): readonly number[] {
  * production or by the BGE model decision.
  */
 export class FixtureSemanticEmbeddingProvider implements EmbeddingProvider {
-  readonly identity: EmbeddingIdentity = {
+  readonly config: EmbeddingConfig = {
     device: "cpu",
     modelId: "kbiss/controlled-semantic-fixture",
+    nativeDimension: DIMENSION,
+    profile: fakeEmbeddingProfile("controlled-semantic-fixture"),
     quantization: "fp32",
     vectorDimension: DIMENSION,
-    maximumTokens: 512,
     normalization: "l2",
   };
+  readonly identity: EmbeddingIdentity = { ...this.config, maximumTokens: 512 };
   readonly batchSize = 16;
   #ready = false;
   #closed = false;

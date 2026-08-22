@@ -6,11 +6,12 @@ import type {
   EmbeddingError,
   EmbeddingIdentity,
   EmbeddingProvider,
+  EmbeddingVector,
   EmbedOptions,
   IndexedChunkRecord,
   IndexedFileRecord,
 } from "../indexing/index.ts";
-import { openLanceIndex } from "../indexing/index.ts";
+import { fakeEmbeddingProfile, openLanceIndex } from "../indexing/index.ts";
 import { indexingConfig } from "../indexing/test-helpers.ts";
 import { ok, type Result } from "../shared/result.ts";
 import { createSearchConfig } from "./config.ts";
@@ -23,6 +24,8 @@ class QueryFixtureEmbeddingProvider implements EmbeddingProvider {
   readonly identity: EmbeddingIdentity = {
     device: "cpu",
     modelId: "kbiss/search-fixture",
+    nativeDimension: 4,
+    profile: fakeEmbeddingProfile("search-fixture"),
     quantization: "fp32",
     vectorDimension: 4,
     maximumTokens: 512,
@@ -108,7 +111,7 @@ function chunkRecord(
   file: IndexedFileRecord,
   chunkId: string,
   displayText: string,
-  vector: readonly number[],
+  vector: EmbeddingVector,
   metadata: {
     readonly heading: string;
     readonly symbols?: readonly string[];

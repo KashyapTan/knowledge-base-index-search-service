@@ -3,6 +3,7 @@ export type {
   EmbeddingErrorCode,
   EmbeddingIdentity,
   EmbeddingProvider,
+  EmbeddingVector,
   EmbedOptions,
   FileExtractionStatus,
   FileIndexStatus,
@@ -24,7 +25,15 @@ export type {
   ModelWarmUpOptions,
 } from "./contracts.ts";
 export {
-  BGE_MODEL_PROFILES,
+  type EmbeddingVectorBatch,
+  type EmbeddingWorkerConfig,
+  PROVISIONAL_EMBEDDING_MODEL,
+  validateEmbeddingVectorBatch,
+  vectorViews,
+} from "./embedding-protocol.ts";
+export {
+  ACCELERATOR_TOKEN_BUCKETS,
+  acceleratorTokenBucket,
   createTransformersEmbeddingProvider,
   type EmbeddingWorkerBoundary,
   TransformersEmbeddingProvider,
@@ -33,6 +42,7 @@ export { EmbeddingWorkerError } from "./embedding-worker-client.ts";
 export {
   FakeEmbeddingProvider,
   type FakeEmbeddingProviderOptions,
+  fakeEmbeddingProfile,
 } from "./fake-embedding-provider.ts";
 export {
   CHUNKS_TABLE,
@@ -49,4 +59,9 @@ export {
   quarantineModelCache,
   verifyOrWriteModelAssetManifest,
 } from "./model-assets.ts";
+export {
+  type EmbeddingTensorData,
+  type PoolEmbeddingOptions,
+  poolEmbeddingTensors,
+} from "./pooling.ts";
 export { createIndexingService, RepositoryIndexingService } from "./service.ts";

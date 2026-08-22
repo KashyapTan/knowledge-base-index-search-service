@@ -5,6 +5,7 @@ import { DEFAULT_INDEX_CONFIG } from "../config/index.ts";
 import type { DiscoveredFile } from "../discovery/index.ts";
 import type { ExtractedFile, ExtractionPipeline, SearchChunk } from "../extraction/index.ts";
 import { ok } from "../shared/result.ts";
+import { fakeEmbeddingProfile } from "./fake-embedding-provider.ts";
 
 export function indexingConfig(
   root: string,
@@ -15,7 +16,9 @@ export function indexingConfig(
   const embedding = {
     device: "cpu" as const,
     modelId: "kbiss/deterministic-fake",
+    nativeDimension: dimension,
     normalization: "l2" as const,
+    profile: fakeEmbeddingProfile(),
     quantization: "fp32" as const,
     vectorDimension: dimension,
   };
@@ -46,7 +49,7 @@ export function indexingConfig(
         sizeTokens: DEFAULT_INDEX_CONFIG.chunkSizeTokens,
         version: DEFAULT_INDEX_CONFIG.chunkerVersion,
       },
-      descriptorVersion: 2,
+      descriptorVersion: 3,
       embedding,
       extractorVersion: DEFAULT_INDEX_CONFIG.extractorVersion,
       indexSchemaVersion: DEFAULT_INDEX_CONFIG.schemaVersion,

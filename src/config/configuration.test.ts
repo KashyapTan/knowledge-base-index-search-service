@@ -127,17 +127,16 @@ describe("configuration precedence and validation", () => {
       JSON.stringify({
         root: fileRoot,
         port: 4001,
-        modelId: "file/model",
+        modelId: "onnx-community/embeddinggemma-300m-ONNX",
         quantization: "q8",
-        vectorDimension: 768,
       }),
     );
     const locations = externalPaths("precedence");
     const env = Object.freeze({
       KBISS_ROOT: environmentRoot,
       KBISS_PORT: "4002",
-      KBISS_MODEL_ID: "environment/model",
-      KBISS_QUANTIZATION: "q4",
+      KBISS_MODEL_ID: "jinaai/jina-embeddings-v2-base-code",
+      KBISS_QUANTIZATION: "fp16",
       KBISS_STATE_DIR: locations.stateDir,
       KBISS_CACHE_DIR: locations.cacheDir,
     });
@@ -147,7 +146,7 @@ describe("configuration precedence and validation", () => {
       "--root",
       cliRoot,
       "--port=4003",
-      "--model=cli/model",
+      "--model=Xenova/bge-base-en-v1.5",
     ]);
 
     const result = await loadAppConfig({
@@ -163,11 +162,12 @@ describe("configuration precedence and validation", () => {
     if (!result.ok) return;
     expect(result.value.sourceRoots[0].path).toBe(cliRoot);
     expect(result.value.server).toEqual({ hostname: "127.0.0.1", port: 4003 });
-    expect(result.value.embedding).toEqual({
+    expect(result.value.embedding).toMatchObject({
       device: "webgpu",
-      modelId: "cli/model",
+      modelId: "Xenova/bge-base-en-v1.5",
+      nativeDimension: 768,
       normalization: "l2",
-      quantization: "q4",
+      quantization: "fp16",
       vectorDimension: 768,
     });
     expect(env.KBISS_ROOT).toBe(environmentRoot);
@@ -214,9 +214,10 @@ describe("configuration precedence and validation", () => {
       platform: "darwin",
       projectDir,
     });
-    expect(apple.ok && apple.value.embedding).toEqual({
+    expect(apple.ok && apple.value.embedding).toMatchObject({
       device: "webgpu",
       modelId: "Xenova/bge-small-en-v1.5",
+      nativeDimension: 384,
       normalization: "l2",
       quantization: "fp16",
       vectorDimension: 384,
@@ -360,6 +361,59 @@ describe("configuration precedence and validation", () => {
     if (!result.ok) expect(result.error.details?.setting).toBe(setting);
   });
 
+  test("derives profile dimensions and rejects unsupported model/device/dtype combinations", async () => {
+    const root = await makeRoot("profile-validation-root");
+    const locations = externalPaths("profile-validation");
+    const base = {
+      env: { KBISS_STATE_DIR: locations.stateDir, KBISS_CACHE_DIR: locations.cacheDir },
+      homeDir: fixtureDir,
+      projectDir,
+    };
+    const gemma = await loadAppConfig({
+      ...base,
+      argv: [
+        "--root",
+        root,
+        "--model",
+        "onnx-community/embeddinggemma-300m-ONNX",
+        "--vector-dimension",
+        "256",
+      ],
+    });
+    expect(gemma.ok && gemma.value.embedding).toMatchObject({
+      device: "cpu",
+      nativeDimension: 768,
+      quantization: "q8",
+      vectorDimension: 256,
+    });
+
+    for (const argv of [
+      ["--root", root, "--model", "unknown/model"],
+      ["--root", root, "--model", "Alibaba-NLP/gte-modernbert-base", "--vector-dimension", "384"],
+      [
+        "--root",
+        root,
+        "--model",
+        "onnx-community/embeddinggemma-300m-ONNX",
+        "--quantization",
+        "fp16",
+      ],
+      [
+        "--root",
+        root,
+        "--model",
+        "Alibaba-NLP/gte-modernbert-base",
+        "--embedding-device",
+        "webgpu",
+      ],
+    ]) {
+      expect(await loadAppConfig({ ...base, argv })).toMatchObject({
+        ok: false,
+        error: { code: "CONFIG_VALUE_INVALID" },
+      });
+    }
+  });
+
   test.each([
     ["{", "not valid JSON"],
     ["[]", "must contain a JSON object"],
@@ -473,7 +527,7 @@ describe("source roots and state paths", () => {
     const second = await loadAppConfig({ ...baseOptions, argv: ["--root", root] });
     const changedModel = await loadAppConfig({
       ...baseOptions,
-      argv: ["--root", root, "--model", "different/model"],
+      argv: ["--root", root, "--model", "Xenova/bge-base-en-v1.5"],
     });
     expect(first.ok && second.ok && changedModel.ok).toBe(true);
     if (!first.ok || !second.ok || !changedModel.ok) return;

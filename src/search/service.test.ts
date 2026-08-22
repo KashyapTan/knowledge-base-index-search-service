@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { FakeEmbeddingProvider } from "../indexing/index.ts";
+import { type EmbeddingVector, FakeEmbeddingProvider } from "../indexing/index.ts";
 import { err, ok } from "../shared/result.ts";
 import type {
   CandidateRetriever,
@@ -17,7 +17,7 @@ class FixtureRetriever implements CandidateRetriever {
   readonly #result: RetrievedCandidatePools;
   calls: Array<{
     query: string;
-    vector: readonly number[];
+    vector: EmbeddingVector;
     formats: readonly string[];
     config: SearchConfig;
     options: SearchOptions;
@@ -36,7 +36,7 @@ class FixtureRetriever implements CandidateRetriever {
 
   async retrieve(
     query: string,
-    vector: readonly number[],
+    vector: EmbeddingVector,
     formats: readonly string[],
     config: SearchConfig,
     options: SearchOptions = {},

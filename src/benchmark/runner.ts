@@ -405,11 +405,20 @@ export async function runLargeRepositoryBenchmark(
       ),
     );
     const tokenizerLoad = await measure(async () => {
-      const tokenizer = await AutoTokenizer.from_pretrained(config.embedding.modelId, {
-        cache_dir: config.paths.modelCacheDir,
-        local_files_only: true,
+      const tokenizer = await AutoTokenizer.from_pretrained(
+        join(
+          config.paths.modelCacheDir,
+          ...config.embedding.modelId.split("/"),
+          config.embedding.profile.revision,
+        ),
+        { local_files_only: true },
+      );
+      return createTransformersTokenCounter(tokenizer, {
+        addSpecialTokens: config.embedding.profile.tokenizer.addSpecialTokens,
+        encoding: config.embedding.profile.documentEncoding,
+        expectedPromptTokenOverhead:
+          config.embedding.profile.tokenizer.promptTokenOverhead.document,
       });
-      return createTransformersTokenCounter(tokenizer);
     });
     const discovery = expectOk(
       await createDiscoveryService(config, {

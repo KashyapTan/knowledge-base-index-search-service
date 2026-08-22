@@ -1,6 +1,7 @@
 import * as lancedb from "@lancedb/lancedb";
 import type { AppConfig } from "../config/index.ts";
 import { readCompatibilityMetadata } from "../config/index.ts";
+import type { EmbeddingVector } from "../indexing/index.ts";
 import { CHUNKS_TABLE, FILES_TABLE } from "../indexing/index.ts";
 import { err, ok, type Result } from "../shared/result.ts";
 import type {
@@ -216,7 +217,7 @@ export class LanceCandidateRetriever implements CandidateRetriever {
 
   async retrieve(
     query: string,
-    vector: readonly number[],
+    vector: EmbeddingVector,
     formats: readonly string[],
     config: SearchConfig,
     options: SearchOptions = {},
@@ -337,7 +338,7 @@ export class LanceCandidateRetriever implements CandidateRetriever {
   }
 
   async #retrieveVector(
-    vector: readonly number[],
+    vector: EmbeddingVector,
     formats: readonly string[],
     limit: number,
     maxDistance: number,

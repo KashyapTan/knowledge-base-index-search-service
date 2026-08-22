@@ -59,7 +59,6 @@ function adapters(
     retrieverCloses,
     value: {
       createEmbeddings: () => embeddings,
-      loadTokenCounter: async () => ({ count: () => 1 }),
       openStore: async () => ok(services.store),
       openRetriever: async () =>
         ok({
@@ -155,9 +154,9 @@ describe("application lifecycle", () => {
 
     const midStartup = adapters(config);
     const midStartupController = new AbortController();
-    midStartup.value.loadTokenCounter = async () => {
+    (midStartup.services.embeddings as EmbeddingProvider).warmUp = async () => {
       midStartupController.abort();
-      return { count: () => 1 };
+      return ok(undefined);
     };
     expect(
       await createProductionServices(config, midStartupController.signal, midStartup.value),
@@ -188,7 +187,7 @@ describe("application lifecycle", () => {
     expect(discoveryFailure.services.store.closes).toBe(1);
 
     const thrown = adapters(config);
-    thrown.value.loadTokenCounter = () => Promise.reject(new Error("private path"));
+    thrown.value.openStore = () => Promise.reject(new Error("private path"));
     expect(
       await createProductionServices(config, new AbortController().signal, thrown.value),
     ).toMatchObject({ ok: false, error: { code: "STARTUP_FAILED" } });

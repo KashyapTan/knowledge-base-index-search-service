@@ -54,25 +54,19 @@ export async function runControlledEvaluation(
   let retriever: LanceCandidateRetriever | undefined;
   try {
     const loaded = await loadAppConfig({
-      argv: [
-        "--root",
-        fixtureRoot,
-        "--model",
-        embeddings.identity.modelId,
-        "--embedding-device",
-        embeddings.identity.device,
-        "--quantization",
-        embeddings.identity.quantization,
-        "--vector-dimension",
-        String(embeddings.identity.vectorDimension),
-      ],
+      argv: ["--root", fixtureRoot],
       env: {
         KBISS_STATE_DIR: join(temporary, "state"),
         KBISS_CACHE_DIR: join(temporary, "cache"),
       },
       projectDir: resolve(import.meta.dir, "../.."),
     });
-    const config = expectOk(loaded);
+    const baseConfig = expectOk(loaded);
+    const config = {
+      ...baseConfig,
+      embedding: embeddings.config,
+      compatibility: { ...baseConfig.compatibility, embedding: embeddings.config },
+    };
     const discovery = expectOk(await createDiscoveryService(config));
     const scan = expectOk(await discovery.scanner.scan("scan"));
     store = expectOk(await openLanceIndex(config));

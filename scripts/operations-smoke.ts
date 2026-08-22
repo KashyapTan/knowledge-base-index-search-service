@@ -1,8 +1,9 @@
 import { cp, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { loadAppConfig } from "../src/config/index.ts";
 import {
+  type EmbeddingVectorBatch,
   type EmbeddingWorkerBoundary,
   EmbeddingWorkerError,
   TransformersEmbeddingProvider,
@@ -11,13 +12,22 @@ import { importModelAssetSource, resetLocalState } from "../src/operations/index
 
 class ControlledModelWorker implements EmbeddingWorkerBoundary {
   readonly #cacheDir: string;
+  readonly #dimension: number;
 
-  constructor(cacheDir: string) {
+  constructor(cacheDir: string, dimension: number) {
     this.#cacheDir = cacheDir;
+    this.#dimension = dimension;
   }
 
   async initialize(config: { readonly localFilesOnly: boolean }): Promise<void> {
-    if (!(await Bun.file(join(this.#cacheDir, "weights.bin")).exists())) {
+    const output = join(
+      this.#cacheDir,
+      "Xenova",
+      "bge-small-en-v1.5",
+      "onnx",
+      "model_quantized.onnx",
+    );
+    if (!(await Bun.file(output).exists())) {
       if (config.localFilesOnly) {
         throw new EmbeddingWorkerError({
           kind: "error",
@@ -26,13 +36,15 @@ class ControlledModelWorker implements EmbeddingWorkerBoundary {
           message: "Controlled assets are missing.",
         });
       }
-      await mkdir(this.#cacheDir, { recursive: true });
-      await writeFile(join(this.#cacheDir, "weights.bin"), "controlled local smoke asset");
+      await mkdir(dirname(output), { recursive: true });
+      await writeFile(output, "controlled local smoke asset");
     }
   }
 
-  async embed(texts: readonly string[]): Promise<readonly (readonly number[])[]> {
-    return texts.map(() => [1, 0]);
+  async embed(texts: readonly string[]): Promise<EmbeddingVectorBatch> {
+    const storage = new Float32Array(texts.length * this.#dimension);
+    for (let index = 0; index < texts.length; index += 1) storage[index * this.#dimension] = 1;
+    return { count: texts.length, dimension: this.#dimension, storage };
   }
 
   async close(): Promise<void> {}
@@ -45,7 +57,7 @@ try {
   await Promise.all([mkdir(root), mkdir(project)]);
   await writeFile(join(root, "guide.md"), "# Controlled local smoke fixture\n");
   const loaded = await loadAppConfig({
-    argv: ["--root", root, "--model", "kbiss/controlled-smoke", "--vector-dimension", "2"],
+    argv: ["--root", root, "--embedding-device", "cpu", "--quantization", "q8"],
     env: {
       KBISS_CACHE_DIR: join(fixture, "cache"),
       KBISS_STATE_DIR: join(fixture, "state"),
@@ -56,7 +68,7 @@ try {
   if (!loaded.ok) throw new Error(loaded.error.message);
   const config = loaded.value;
   const first = new TransformersEmbeddingProvider(config.embedding, config.paths.modelCacheDir, {
-    worker: new ControlledModelWorker(config.paths.modelCacheDir),
+    worker: new ControlledModelWorker(config.paths.modelCacheDir, config.embedding.vectorDimension),
   });
   const prepared = await first.warmUp({ allowDownload: true, downloadRetries: 1 });
   await first.shutdown();
@@ -70,7 +82,7 @@ try {
   if (!imported.ok) throw new Error(imported.error.message);
 
   const offline = new TransformersEmbeddingProvider(config.embedding, config.paths.modelCacheDir, {
-    worker: new ControlledModelWorker(config.paths.modelCacheDir),
+    worker: new ControlledModelWorker(config.paths.modelCacheDir, config.embedding.vectorDimension),
   });
   const restarted = await offline.warmUp({ allowDownload: false });
   await offline.shutdown();

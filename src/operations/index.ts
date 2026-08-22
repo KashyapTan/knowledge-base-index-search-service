@@ -493,7 +493,10 @@ export async function importModelAssetSource(
       "The model asset source and managed model cache must be separate directories.",
     );
   }
-  const identity = { ...config.embedding, maximumTokens: 512 };
+  const identity = {
+    ...config.embedding,
+    maximumTokens: 512,
+  };
   const inspection = await inspectModelAssets(source, identity);
   if (inspection.state !== "ready") {
     return operationFailure(

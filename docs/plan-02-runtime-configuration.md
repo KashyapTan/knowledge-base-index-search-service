@@ -21,8 +21,8 @@ The sources map as follows:
 | Preferred port | `--port` | `KBISS_PORT` | `port` | `3210` |
 | Model ID | `--model` | `KBISS_MODEL_ID` | `modelId` | `Xenova/bge-small-en-v1.5` |
 | Embedding device | `--embedding-device` | `KBISS_EMBEDDING_DEVICE` | `embeddingDevice` | `auto` |
-| Quantization | `--quantization` | `KBISS_QUANTIZATION` | `quantization` | Apple Silicon `fp16`; otherwise `q8` |
-| Vector dimensions | `--vector-dimension` | `KBISS_VECTOR_DIMENSION` | `vectorDimension` | `384` |
+| Quantization | `--quantization` | `KBISS_QUANTIZATION` | `quantization` | Selected profile/device default |
+| Vector dimensions | `--vector-dimension` | `KBISS_VECTOR_DIMENSION` | `vectorDimension` | Selected profile native dimension |
 | Normalization | `--normalization` | `KBISS_NORMALIZATION` | `normalization` | `l2` |
 | Offline model policy | `--offline[=true|false]` | `KBISS_OFFLINE` | `offline` | `false` |
 | State directory | `--state-dir` | `KBISS_STATE_DIR` | `stateDir` | OS-specific |
@@ -36,10 +36,13 @@ Unknown CLI options, unknown JSON keys, unsupported quantization values, non-pos
 dimensions, non-`l2` normalization, and ports outside 1-65535 produce structured display-safe
 errors. The loader does not mutate its arguments or environment.
 
-`embeddingDevice:auto` resolves to `webgpu` on macOS arm64 and `cpu` elsewhere. When quantization
-is not explicitly configured, WebGPU selects `fp16` and CPU selects `q8`. The resolved concrete
+As of Plan 12, `--model` must identify a reviewed versioned profile. Device, dtype, and output
+dimension defaults are derived from that profile, and explicit overrides must be in its supported
+matrix. `embeddingDevice:auto` uses WebGPU on macOS arm64 only when the selected profile has a
+reviewed WebGPU path; otherwise it uses the profile's reviewed default device. The resolved concrete
 device and dtype—not `auto`—are persisted in model/index namespaces and compatibility metadata, so
-vectors from different execution profiles are never mixed.
+vectors from different execution profiles are never mixed. The complete registry is documented in
+[`docs/plan-12-versioned-embedding-model-profiles-and-runtime.md`](plan-12-versioned-embedding-model-profiles-and-runtime.md).
 
 The config file defaults are:
 
@@ -109,11 +112,14 @@ State/cache paths inside either repository are rejected.
 
 ## Compatibility descriptor
 
-`IndexCompatibility` persists only compatibility inputs:
+`IndexCompatibility` persists only compatibility inputs. Plan 12 descriptor version 3 includes:
 
 - descriptor and application versions;
 - index schema version;
-- embedding model ID, execution device, quantization, vector dimension, and `l2` normalization;
+- embedding model ID, immutable revision, model-profile version, provenance/license identity,
+  execution device, quantization, native/selected vector dimensions, and `l2` normalization;
+- pooling strategy/required tensor, exact query/document encoding identities and prompts, and
+  tokenizer padding/truncation/special-token policies;
 - extractor and chunker versions;
 - chunk-size and overlap policy;
 - opaque canonical-root identity.

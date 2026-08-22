@@ -5,6 +5,51 @@ export const LOOPBACK_HOST = "127.0.0.1" as const;
 
 export type EmbeddingDevice = "cpu" | "coreml" | "webgpu";
 export type ConfiguredEmbeddingDevice = EmbeddingDevice | "auto";
+export type EmbeddingPoolingStrategy = "mean" | "cls" | "last-token" | "model-output";
+export type TokenizerPaddingSide = "left" | "right";
+export type TokenizerTruncationSide = "left" | "right";
+
+export interface EmbeddingEncodingConfig {
+  /** Stable identity for this exact task/prompt convention. */
+  readonly id: string;
+  readonly prefix: string;
+  readonly suffix: string;
+  readonly version: number;
+}
+
+export interface EmbeddingTokenizerConfig {
+  readonly addSpecialTokens: boolean;
+  readonly paddingSide: TokenizerPaddingSide;
+  /** Empty-payload count including the configured prompt and special tokens. */
+  readonly promptTokenOverhead: {
+    readonly document: number;
+    readonly query: number;
+  };
+  readonly specialTokenPolicyVersion: number;
+  readonly truncation: "longest-first";
+  readonly truncationSide: TokenizerTruncationSide;
+  readonly version: number;
+}
+
+export interface EmbeddingPoolingConfig {
+  readonly modelOutputNormalized: boolean;
+  /** Required output tensor; no fallback tensor selection is permitted. */
+  readonly outputTensor: string;
+  readonly strategy: EmbeddingPoolingStrategy;
+  readonly version: number;
+}
+
+export interface EmbeddingProfileCompatibility {
+  readonly assetProvenance: string;
+  readonly documentEncoding: EmbeddingEncodingConfig;
+  readonly license: string;
+  readonly pooling: EmbeddingPoolingConfig;
+  readonly profileVersion: number;
+  readonly queryEncoding: EmbeddingEncodingConfig;
+  /** Immutable Hub commit used for every tokenizer/model load. */
+  readonly revision: string;
+  readonly tokenizer: EmbeddingTokenizerConfig;
+}
 
 export interface SourceRoot {
   /** A stable, opaque identity derived from the canonical path. */
@@ -16,7 +61,9 @@ export interface SourceRoot {
 export interface EmbeddingConfig {
   readonly device: EmbeddingDevice;
   readonly modelId: string;
+  readonly nativeDimension: number;
   readonly normalization: "l2";
+  readonly profile: EmbeddingProfileCompatibility;
   readonly quantization: DataType;
   readonly vectorDimension: number;
 }

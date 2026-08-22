@@ -52,7 +52,7 @@ describe("compatibility classification", () => {
       "application version",
       (value: IndexCompatibility) => ({ ...value, applicationVersion: "1.0.0" }),
     ],
-    ["descriptor version", (value: IndexCompatibility) => ({ ...value, descriptorVersion: 3 })],
+    ["descriptor version", (value: IndexCompatibility) => ({ ...value, descriptorVersion: 4 })],
   ] as const)("requires migration for %s drift", (_name, mutate) => {
     expect(classifyIndexCompatibility(mutate(expected()), expected()).status).toBe(
       "migration-required",
@@ -90,6 +90,75 @@ describe("compatibility classification", () => {
         embedding: { ...value.embedding, vectorDimension: 768 },
       }),
     ],
+    [
+      "native dimension",
+      (value: IndexCompatibility) => ({
+        ...value,
+        embedding: { ...value.embedding, nativeDimension: 768 },
+      }),
+    ],
+    [
+      "revision",
+      (value: IndexCompatibility) => ({
+        ...value,
+        embedding: {
+          ...value.embedding,
+          profile: { ...value.embedding.profile, revision: "b".repeat(40) },
+        },
+      }),
+    ],
+    [
+      "profile version",
+      (value: IndexCompatibility) => ({
+        ...value,
+        embedding: {
+          ...value.embedding,
+          profile: {
+            ...value.embedding.profile,
+            profileVersion: value.embedding.profile.profileVersion + 1,
+          },
+        },
+      }),
+    ],
+    [
+      "pooling",
+      (value: IndexCompatibility) => ({
+        ...value,
+        embedding: {
+          ...value.embedding,
+          profile: {
+            ...value.embedding.profile,
+            pooling: { ...value.embedding.profile.pooling, strategy: "cls" as const },
+          },
+        },
+      }),
+    ],
+    ...(["documentEncoding", "queryEncoding", "tokenizer"] as const).map(
+      (field) =>
+        [
+          field,
+          (value: IndexCompatibility) => ({
+            ...value,
+            embedding: {
+              ...value.embedding,
+              profile: {
+                ...value.embedding.profile,
+                [field]:
+                  field === "tokenizer"
+                    ? {
+                        ...value.embedding.profile.tokenizer,
+                        specialTokenPolicyVersion:
+                          value.embedding.profile.tokenizer.specialTokenPolicyVersion + 1,
+                      }
+                    : {
+                        ...value.embedding.profile[field],
+                        prefix: `${value.embedding.profile[field].prefix}changed: `,
+                      },
+              },
+            },
+          }),
+        ] as const,
+    ),
     ["extractor", (value: IndexCompatibility) => ({ ...value, extractorVersion: 2 })],
     [
       "chunker",
@@ -183,7 +252,7 @@ describe("persisted compatibility metadata", () => {
   test("accepts a structurally valid descriptor with a newer metadata version", async () => {
     const path = join(fixtureDir, "newer.json");
     await mkdir(join(fixtureDir, "unused"));
-    await writeFile(path, JSON.stringify({ ...expected(), descriptorVersion: 3 }));
+    await writeFile(path, JSON.stringify({ ...expected(), descriptorVersion: 4 }));
     const result = await readCompatibilityMetadata(path, expected());
     expect(result).toMatchObject({ ok: true, value: { status: "migration-required" } });
   });

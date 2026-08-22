@@ -2,7 +2,8 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { mkdir, mkdtemp, readdir, rm, symlink, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { EmbeddingWorkerConfig } from "./embedding-protocol.ts";
+import { type EmbeddingModelProfile, embeddingConfigFromProfile } from "../config/index.ts";
+import type { EmbeddingVectorBatch, EmbeddingWorkerConfig } from "./embedding-protocol.ts";
 import {
   acceleratorTokenBucket,
   createTransformersEmbeddingProvider,
@@ -28,37 +29,78 @@ afterEach(async () => {
   await rm(fixture, { recursive: true, force: true });
 });
 
-const embedding = {
-  device: "cpu" as const,
-  modelId: "kbiss/fake-model",
-  normalization: "l2" as const,
-  quantization: "fp32" as const,
-  vectorDimension: 2,
+const profile: EmbeddingModelProfile = {
+  applicationIndexingLimit: 512,
+  assetProvenance: "test-reviewed-onnx",
+  canonicalModelId: "kbiss/fake-model",
+  defaultDevice: "cpu",
+  documentEncoding: { id: "test-document", prefix: "doc: ", suffix: "", version: 1 },
+  execution: {
+    cpu: {
+      defaultDtype: "fp32",
+      dtypes: ["fp32"],
+      maximumBatchSize: 16,
+      shapePolicy: "dynamic",
+      tokenBuckets: [],
+      workerSessions: 2,
+    },
+    webgpu: {
+      defaultDtype: "fp16",
+      dtypes: ["fp16"],
+      maximumBatchSize: 16,
+      shapePolicy: "fixed-buckets",
+      tokenBuckets: [64, 128, 256, 384, 512],
+      workerSessions: 1,
+    },
+  },
+  license: { eligibleForTeamUse: true, identifier: "test-only" },
+  matryoshkaDimensions: [2],
+  nativeContextLimit: 512,
+  nativeDimension: 2,
+  pooling: {
+    modelOutputNormalized: false,
+    outputTensor: "last_hidden_state",
+    strategy: "mean",
+    version: 1,
+  },
+  profileVersion: 1,
+  queryEncoding: { id: "test-query", prefix: "query: ", suffix: "", version: 1 },
+  queryTaskAlternatives: [],
+  revision: "0123456789abcdef0123456789abcdef01234567",
+  tokenizer: {
+    addSpecialTokens: true,
+    paddingSide: "right",
+    promptTokenOverhead: { document: 3, query: 3 },
+    specialTokenPolicyVersion: 1,
+    truncation: "longest-first",
+    truncationSide: "right",
+    version: 1,
+  },
 };
+
+const embedding = embeddingConfigFromProfile(profile, "cpu", "fp32", 2);
+
+function vectorBatch(vectors: readonly (readonly number[])[]): EmbeddingVectorBatch {
+  const dimension = vectors[0]?.length ?? 0;
+  return {
+    count: vectors.length,
+    dimension,
+    storage: Float32Array.from(vectors.flat()),
+  };
+}
 
 describe("model asset integrity", () => {
   const identity = {
-    device: embedding.device,
-    modelId: embedding.modelId,
-    quantization: embedding.quantization,
-    vectorDimension: embedding.vectorDimension,
+    ...embedding,
     maximumTokens: 512,
-    normalization: embedding.normalization,
   };
 
   test("records checksums and rejects changed cached assets", async () => {
     const cache = join(fixture, "models");
-    await mkdir(join(cache, "model"), { recursive: true });
-    const asset = join(cache, "model", "weights.onnx");
+    await mkdir(join(cache, "model", "onnx"), { recursive: true });
+    const asset = join(cache, "model", "onnx", "model.onnx");
     await writeFile(asset, "weights-one");
-    const identity = {
-      device: embedding.device,
-      modelId: embedding.modelId,
-      quantization: embedding.quantization,
-      vectorDimension: embedding.vectorDimension,
-      maximumTokens: 512,
-      normalization: embedding.normalization,
-    };
+    const identity = { ...embedding, maximumTokens: 512 };
     expect(await verifyOrWriteModelAssetManifest(cache, identity, "write-if-missing")).toEqual({
       ok: true,
       value: undefined,
@@ -79,6 +121,7 @@ describe("model asset integrity", () => {
     await mkdir(cache, { recursive: true });
     await writeFile(join(cache, "kbiss-model-assets.json"), "not-json");
     const provider = new TransformersEmbeddingProvider(embedding, cache, {
+      profile,
       worker: new RecordingWorker(cache),
     });
     const result = await provider.warmUp();
@@ -90,18 +133,12 @@ describe("model asset integrity", () => {
   test("rejects cached asset symlinks after a manifest is written", async () => {
     const cache = join(fixture, "symlink-models");
     await mkdir(cache, { recursive: true });
-    const asset = join(cache, "weights.bin");
+    const asset = join(cache, "onnx", "model.onnx");
     const outside = join(fixture, "outside.bin");
+    await mkdir(join(cache, "onnx"));
     await writeFile(asset, "same bytes");
     await writeFile(outside, "same bytes");
-    const identity = {
-      device: embedding.device,
-      modelId: embedding.modelId,
-      quantization: embedding.quantization,
-      vectorDimension: embedding.vectorDimension,
-      maximumTokens: 512,
-      normalization: embedding.normalization,
-    };
+    const identity = { ...embedding, maximumTokens: 512 };
     expect((await verifyOrWriteModelAssetManifest(cache, identity, "write-if-missing")).ok).toBe(
       true,
     );
@@ -131,14 +168,27 @@ describe("model asset integrity", () => {
 
     const mismatch = join(fixture, "mismatch-models");
     await mkdir(mismatch);
-    await writeFile(join(mismatch, "weights.bin"), "weights");
+    await mkdir(join(mismatch, "onnx"));
+    await writeFile(join(mismatch, "onnx", "model.onnx"), "weights");
     expect((await verifyOrWriteModelAssetManifest(mismatch, identity, "write-if-missing")).ok).toBe(
       true,
     );
     expect(
       await inspectModelAssets(mismatch, { ...identity, modelId: "kbiss/different-model" }),
     ).toMatchObject({ state: "corrupt" });
-    await rm(join(mismatch, "weights.bin"));
+    expect(
+      await inspectModelAssets(mismatch, {
+        ...identity,
+        profile: { ...identity.profile, revision: "f".repeat(40) },
+      }),
+    ).toMatchObject({ state: "corrupt" });
+    expect(
+      await inspectModelAssets(mismatch, {
+        ...identity,
+        profile: { ...identity.profile, profileVersion: identity.profile.profileVersion + 1 },
+      }),
+    ).toMatchObject({ state: "corrupt" });
+    await rm(join(mismatch, "onnx", "model.onnx"));
     expect(await inspectModelAssets(mismatch, identity)).toMatchObject({ state: "corrupt" });
   });
 
@@ -168,6 +218,7 @@ describe("model asset integrity", () => {
 
 class RecordingWorker implements EmbeddingWorkerBoundary {
   readonly configs: EmbeddingWorkerConfig[] = [];
+  readonly embeddedTexts: string[][] = [];
   readonly embedMaximumTokens: Array<number | undefined> = [];
   readonly #cache: string;
   readonly #failLocal: boolean;
@@ -189,15 +240,15 @@ class RecordingWorker implements EmbeddingWorkerBoundary {
       });
     }
     await mkdir(this.#cache, { recursive: true });
-    await writeFile(join(this.#cache, "weights.bin"), "local weights");
+    await mkdir(join(this.#cache, "onnx"), { recursive: true });
+    const filename = config.dtype === "fp32" ? "model.onnx" : `model_${config.dtype}.onnx`;
+    await writeFile(join(this.#cache, "onnx", filename), "local weights");
   }
 
-  async embed(
-    texts: readonly string[],
-    maximumTokens?: number,
-  ): Promise<readonly (readonly number[])[]> {
+  async embed(texts: readonly string[], maximumTokens?: number): Promise<EmbeddingVectorBatch> {
     this.embedMaximumTokens.push(maximumTokens);
-    return texts.map(() => [1, 0]);
+    this.embeddedTexts.push([...texts]);
+    return vectorBatch(texts.map(() => [1, 0]));
   }
 
   async close(): Promise<void> {
@@ -219,15 +270,16 @@ class ConcurrentWorker implements EmbeddingWorkerBoundary {
   async initialize(): Promise<void> {
     this.initializeCalls += 1;
     await mkdir(this.#cache, { recursive: true });
-    await writeFile(join(this.#cache, "weights.bin"), "local weights");
+    await mkdir(join(this.#cache, "onnx"), { recursive: true });
+    await writeFile(join(this.#cache, "onnx", "model.onnx"), "local weights");
   }
 
-  async embed(texts: readonly string[]): Promise<readonly (readonly number[])[]> {
+  async embed(texts: readonly string[]): Promise<EmbeddingVectorBatch> {
     this.#state.active += 1;
     this.#state.maxActive = Math.max(this.#state.maxActive, this.#state.active);
     await Bun.sleep(20);
     this.#state.active -= 1;
-    return texts.map(() => [1, 0]);
+    return vectorBatch(texts.map(() => [1, 0]));
   }
 
   async close(): Promise<void> {
@@ -236,6 +288,17 @@ class ConcurrentWorker implements EmbeddingWorkerBoundary {
 }
 
 describe("Transformers provider orchestration", () => {
+  test("uses the profile's distinct document and query encodings exactly once", async () => {
+    const cache = join(fixture, "prompt-models");
+    const worker = new RecordingWorker(cache);
+    const provider = new TransformersEmbeddingProvider(embedding, cache, { profile, worker });
+    expect((await provider.warmUp({ allowDownload: true })).ok).toBe(true);
+    expect((await provider.embedDocuments(["retry helper"])).ok).toBe(true);
+    expect((await provider.embedQuery("find retries")).ok).toBe(true);
+    expect(worker.embeddedTexts).toEqual([["doc: retry helper"], ["query: find retries"]]);
+    await provider.shutdown();
+  });
+
   test("uses fixed accelerator token buckets and restores original vector order", async () => {
     expect([1, 64, 65, 384, 385, 900].map((count) => acceleratorTokenBucket(count, 512))).toEqual([
       64, 64, 128, 384, 512, 512,
@@ -244,28 +307,26 @@ describe("Transformers provider orchestration", () => {
     const worker = new RecordingWorker(cache);
     worker.embed = async (texts, maximumTokens) => {
       worker.embedMaximumTokens.push(maximumTokens);
-      return texts.map((text) =>
-        text === "short" ? [1, 0] : text === "medium" ? [0, 1] : [-1, 0],
+      return vectorBatch(
+        texts.map((text) =>
+          text.endsWith("short") ? [1, 0] : text.endsWith("medium") ? [0, 1] : [-1, 0],
+        ),
       );
     };
     const provider = new TransformersEmbeddingProvider(
       { ...embedding, device: "webgpu", quantization: "fp16" },
       cache,
-      { batchSize: 16, worker },
+      { batchSize: 16, profile, worker },
     );
     expect((await provider.warmUp({ allowDownload: true })).ok).toBe(true);
-    expect(
-      await provider.embedDocuments(["long", "short", "medium"], {
-        tokenCounts: [300, 10, 70],
-      }),
-    ).toEqual({
-      ok: true,
-      value: [
-        [-1, 0],
-        [1, 0],
-        [0, 1],
-      ],
+    const ordered = await provider.embedDocuments(["long", "short", "medium"], {
+      tokenCounts: [300, 10, 70],
     });
+    expect(ordered.ok && ordered.value.map((vector) => Array.from(vector))).toEqual([
+      [-1, 0],
+      [1, 0],
+      [0, 1],
+    ]);
     expect(worker.embedMaximumTokens).toEqual([64, 128, 384]);
     const invalid = await provider.embedDocuments(["one", "two"], { tokenCounts: [1] });
     expect(invalid).toMatchObject({ ok: false, error: { code: "INFERENCE_FAILED" } });
@@ -278,6 +339,7 @@ describe("Transformers provider orchestration", () => {
     const workers: ConcurrentWorker[] = [];
     const provider = new TransformersEmbeddingProvider(embedding, cache, {
       batchSize: 1,
+      profile,
       workerCount: 2,
       workerFactory: () => {
         const worker = new ConcurrentWorker(cache, state);
@@ -300,7 +362,7 @@ describe("Transformers provider orchestration", () => {
     await mkdir(cache, { recursive: true });
     await writeFile(join(cache, "kbiss-model-assets.json"), "{");
     const worker = new RecordingWorker(cache, true);
-    const provider = new TransformersEmbeddingProvider(embedding, cache, { worker });
+    const provider = new TransformersEmbeddingProvider(embedding, cache, { profile, worker });
     const phases: string[] = [];
     expect(
       await provider.warmUp({
@@ -321,7 +383,10 @@ describe("Transformers provider orchestration", () => {
   test("requires explicit setup before allowing a pinned remote download", async () => {
     const cache = join(fixture, "models");
     const missingWorker = new RecordingWorker(cache, true);
-    const missing = new TransformersEmbeddingProvider(embedding, cache, { worker: missingWorker });
+    const missing = new TransformersEmbeddingProvider(embedding, cache, {
+      profile,
+      worker: missingWorker,
+    });
     const unavailable = await missing.warmUp();
     expect(unavailable.ok).toBe(false);
     if (!unavailable.ok) expect(unavailable.error.code).toBe("MODEL_ASSETS_MISSING");
@@ -330,7 +395,10 @@ describe("Transformers provider orchestration", () => {
 
     const setupCache = join(fixture, "setup-models");
     const setupWorker = new RecordingWorker(setupCache, true);
-    const setup = new TransformersEmbeddingProvider(embedding, setupCache, { worker: setupWorker });
+    const setup = new TransformersEmbeddingProvider(embedding, setupCache, {
+      profile,
+      worker: setupWorker,
+    });
     expect(await setup.warmUp({ allowDownload: true })).toEqual({ ok: true, value: undefined });
     expect(setupWorker.configs.map((config) => config.localFilesOnly)).toEqual([false]);
     expect(await Bun.file(join(setupCache, "kbiss-model-assets.json")).exists()).toBe(true);
@@ -340,7 +408,8 @@ describe("Transformers provider orchestration", () => {
   test("uses one real Worker with bounded backpressure, cancellation, batching, and shutdown", async () => {
     const cache = join(fixture, "worker-models");
     await mkdir(cache, { recursive: true });
-    await writeFile(join(cache, "weights.bin"), "fixture");
+    await mkdir(join(cache, "onnx"));
+    await writeFile(join(cache, "onnx", "model.onnx"), "fixture");
     const boundary = new EmbeddingWorkerClient(
       new URL("./fixtures/fake-embedding.worker.ts", import.meta.url),
     );
@@ -348,6 +417,7 @@ describe("Transformers provider orchestration", () => {
       worker: boundary,
       batchSize: 1,
       maxQueue: 2,
+      profile,
     });
     expect(await provider.warmUp({ allowDownload: true })).toEqual({ ok: true, value: undefined });
 
@@ -358,7 +428,8 @@ describe("Transformers provider orchestration", () => {
     const rejected = await provider.embedDocuments(["overflow"]);
     expect(rejected.ok).toBe(false);
     if (!rejected.ok) expect(rejected.error.code).toBe("EMBEDDING_QUEUE_FULL");
-    expect(await first).toEqual({ ok: true, value: [[1, 0]] });
+    const firstResult = await first;
+    expect(firstResult.ok && Array.from(firstResult.value[0] ?? [])).toEqual([1, 0]);
     const cancelledResult = await cancelled;
     expect(cancelledResult.ok).toBe(false);
     if (!cancelledResult.ok) expect(cancelledResult.error.code).toBe("EMBEDDING_CANCELLED");
@@ -369,7 +440,8 @@ describe("Transformers provider orchestration", () => {
     });
     expect(batched.ok && batched.value).toHaveLength(3);
     expect(batches).toEqual([1, 2, 3]);
-    expect(await provider.embedQuery("query")).toEqual({ ok: true, value: [1, 0] });
+    const query = await provider.embedQuery("query");
+    expect(query.ok && Array.from(query.value)).toEqual([1, 0]);
     await provider.shutdown();
     const closed = await provider.embedDocuments(["late"]);
     expect(closed.ok).toBe(false);
@@ -379,13 +451,13 @@ describe("Transformers provider orchestration", () => {
   test("rejects malformed dimensions and non-normalized vectors", async () => {
     const cache = join(fixture, "invalid-models");
     const worker = new RecordingWorker(cache);
-    worker.embed = async () => [[1, 1, 1]];
-    const provider = new TransformersEmbeddingProvider(embedding, cache, { worker });
+    worker.embed = async () => vectorBatch([[1, 1, 1]]);
+    const provider = new TransformersEmbeddingProvider(embedding, cache, { profile, worker });
     expect((await provider.warmUp({ allowDownload: true })).ok).toBe(true);
     const dimensions = await provider.embedDocuments(["bad"]);
     expect(dimensions.ok).toBe(false);
     if (!dimensions.ok) expect(dimensions.error.code).toBe("VECTOR_DIMENSION_INVALID");
-    worker.embed = async () => [[1, 1]];
+    worker.embed = async () => vectorBatch([[1, 1]]);
     const normalization = await provider.embedDocuments(["bad norm"]);
     expect(normalization.ok).toBe(false);
     if (!normalization.ok) expect(normalization.error.code).toBe("VECTOR_NORMALIZATION_INVALID");
@@ -393,8 +465,14 @@ describe("Transformers provider orchestration", () => {
   });
 
   test("composes from AppConfig and maps real Worker protocol and crash failures", async () => {
-    const config = indexingConfig(fixture, join(fixture, "state"), join(fixture, "cache"), 2);
+    const baseConfig = indexingConfig(fixture, join(fixture, "state"), join(fixture, "cache"), 2);
+    const config = {
+      ...baseConfig,
+      embedding,
+      compatibility: { ...baseConfig.compatibility, embedding },
+    };
     const composed = createTransformersEmbeddingProvider(config, {
+      profile,
       worker: new RecordingWorker(config.paths.modelCacheDir),
     });
     expect(composed.identity.vectorDimension).toBe(2);
@@ -447,12 +525,20 @@ describe("Transformers provider orchestration", () => {
     });
     await expect(
       crashing.initialize({
+        cacheDir: fixture,
         device: embedding.device,
+        documentEncoding: profile.documentEncoding,
         modelId: embedding.modelId,
         dtype: embedding.quantization,
         expectedDimension: 2,
-        cacheDir: fixture,
         localFilesOnly: true,
+        maximumTokens: profile.applicationIndexingLimit,
+        nativeDimension: profile.nativeDimension,
+        pooling: profile.pooling,
+        profileVersion: profile.profileVersion,
+        queryEncoding: profile.queryEncoding,
+        revision: profile.revision,
+        tokenizer: profile.tokenizer,
       }),
     ).rejects.toThrow("fixture worker crash");
     await crashing.close();

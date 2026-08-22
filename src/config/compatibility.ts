@@ -48,6 +48,65 @@ function isNonNegativeInteger(value: unknown): value is number {
   return typeof value === "number" && Number.isInteger(value) && value >= 0;
 }
 
+function isEncoding(value: unknown): boolean {
+  if (!value || typeof value !== "object") return false;
+  const encoding = value as Record<string, unknown>;
+  return (
+    typeof encoding.id === "string" &&
+    encoding.id.length > 0 &&
+    typeof encoding.prefix === "string" &&
+    typeof encoding.suffix === "string" &&
+    isPositiveInteger(encoding.version)
+  );
+}
+
+function isTokenizer(value: unknown): boolean {
+  if (!value || typeof value !== "object") return false;
+  const tokenizer = value as Record<string, unknown>;
+  const overhead = tokenizer.promptTokenOverhead as Record<string, unknown> | undefined;
+  return (
+    typeof tokenizer.addSpecialTokens === "boolean" &&
+    ["left", "right"].includes(String(tokenizer.paddingSide)) &&
+    overhead !== undefined &&
+    isNonNegativeInteger(overhead.document) &&
+    isNonNegativeInteger(overhead.query) &&
+    isPositiveInteger(tokenizer.specialTokenPolicyVersion) &&
+    tokenizer.truncation === "longest-first" &&
+    ["left", "right"].includes(String(tokenizer.truncationSide)) &&
+    isPositiveInteger(tokenizer.version)
+  );
+}
+
+function isPooling(value: unknown): boolean {
+  if (!value || typeof value !== "object") return false;
+  const pooling = value as Record<string, unknown>;
+  return (
+    typeof pooling.modelOutputNormalized === "boolean" &&
+    typeof pooling.outputTensor === "string" &&
+    pooling.outputTensor.length > 0 &&
+    ["mean", "cls", "last-token", "model-output"].includes(String(pooling.strategy)) &&
+    isPositiveInteger(pooling.version)
+  );
+}
+
+function isProfile(value: unknown): boolean {
+  if (!value || typeof value !== "object") return false;
+  const profile = value as Record<string, unknown>;
+  return (
+    typeof profile.assetProvenance === "string" &&
+    profile.assetProvenance.length > 0 &&
+    isEncoding(profile.documentEncoding) &&
+    typeof profile.license === "string" &&
+    profile.license.length > 0 &&
+    isPooling(profile.pooling) &&
+    isPositiveInteger(profile.profileVersion) &&
+    isEncoding(profile.queryEncoding) &&
+    typeof profile.revision === "string" &&
+    /^[a-f0-9]{40}$/u.test(profile.revision) &&
+    isTokenizer(profile.tokenizer)
+  );
+}
+
 function parseCompatibility(value: unknown): IndexCompatibility | undefined {
   if (!value || typeof value !== "object") return undefined;
   const candidate = value as Record<string, unknown>;
@@ -64,7 +123,9 @@ function parseCompatibility(value: unknown): IndexCompatibility | undefined {
     !embedding ||
     typeof embedding.modelId !== "string" ||
     !embedding.modelId ||
+    !isPositiveInteger(embedding.nativeDimension) ||
     embedding.normalization !== "l2" ||
+    !isProfile(embedding.profile) ||
     typeof embedding.quantization !== "string" ||
     !SUPPORTED_QUANTIZATIONS.has(embedding.quantization as DataType) ||
     (embedding.device !== undefined &&
@@ -95,6 +156,36 @@ function equalIndexInputs(left: IndexCompatibility, right: IndexCompatibility): 
     differences.push("index schema changed");
   if (left.embedding.modelId !== right.embedding.modelId)
     differences.push("embedding model changed");
+  if (left.embedding.nativeDimension !== right.embedding.nativeDimension)
+    differences.push("native model dimension changed");
+  if (left.embedding.profile.revision !== right.embedding.profile.revision)
+    differences.push("immutable model revision changed");
+  if (left.embedding.profile.profileVersion !== right.embedding.profile.profileVersion)
+    differences.push("embedding model profile changed");
+  if (
+    JSON.stringify(left.embedding.profile.pooling) !==
+    JSON.stringify(right.embedding.profile.pooling)
+  )
+    differences.push("embedding pooling or output tensor contract changed");
+  if (
+    JSON.stringify(left.embedding.profile.documentEncoding) !==
+    JSON.stringify(right.embedding.profile.documentEncoding)
+  )
+    differences.push("document embedding prompt changed");
+  if (
+    JSON.stringify(left.embedding.profile.queryEncoding) !==
+    JSON.stringify(right.embedding.profile.queryEncoding)
+  )
+    differences.push("query embedding prompt changed");
+  if (
+    JSON.stringify(left.embedding.profile.tokenizer) !==
+    JSON.stringify(right.embedding.profile.tokenizer)
+  )
+    differences.push("embedding tokenizer policy changed");
+  if (left.embedding.profile.assetProvenance !== right.embedding.profile.assetProvenance)
+    differences.push("model asset provenance changed");
+  if (left.embedding.profile.license !== right.embedding.profile.license)
+    differences.push("model license identity changed");
   if (left.embedding.device !== right.embedding.device)
     differences.push("embedding execution device changed");
   if (left.embedding.quantization !== right.embedding.quantization)

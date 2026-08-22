@@ -4,6 +4,7 @@ import type { DiscoveredFile, FileChange } from "../discovery/index.ts";
 import type { ExtractedFile, SearchChunk } from "../extraction/index.ts";
 import { err, ok, type Result } from "../shared/result.ts";
 import type {
+  EmbeddingVector,
   IndexedChunkRecord,
   IndexedFileRecord,
   IndexingDependencies,
@@ -60,13 +61,13 @@ type PreparedFile =
       readonly kind: "content";
       readonly file: DiscoveredFile;
       readonly extracted: ExtractedFile;
-      readonly reusable: ReadonlyMap<string, readonly number[]>;
+      readonly reusable: ReadonlyMap<string, EmbeddingVector>;
       readonly missing: readonly SearchChunk[];
     };
 
 interface EmbeddedFile {
   readonly prepared: Extract<PreparedFile, { readonly kind: "content" }>;
-  readonly vectors?: readonly (readonly number[])[];
+  readonly vectors?: readonly EmbeddingVector[];
   readonly error?: FileIssue;
 }
 
@@ -148,7 +149,7 @@ function chunkRecord(
   config: AppConfig,
   file: DiscoveredFile,
   chunk: SearchChunk,
-  vector: readonly number[],
+  vector: EmbeddingVector,
 ): IndexedChunkRecord {
   return {
     chunkId: chunk.chunkId,

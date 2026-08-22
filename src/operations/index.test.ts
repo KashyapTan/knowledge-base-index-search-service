@@ -314,8 +314,19 @@ describe("root and model asset operations", () => {
   test("imports only a verified, symlink-free model bundle and preserves the old cache", async () => {
     const source = join(fixture, "airgap-model");
     await mkdir(source);
-    await writeFile(join(source, "weights.bin"), "verified weights");
-    const identity = { ...config.embedding, maximumTokens: 512 };
+    await mkdir(join(source, "Xenova", "bge-small-en-v1.5", "onnx"), { recursive: true });
+    const sourceOutput = join(
+      source,
+      "Xenova",
+      "bge-small-en-v1.5",
+      "onnx",
+      config.embedding.quantization === "fp16" ? "model_fp16.onnx" : "model_quantized.onnx",
+    );
+    await writeFile(sourceOutput, "verified weights");
+    const identity = {
+      ...config.embedding,
+      maximumTokens: 512,
+    };
     expect((await verifyOrWriteModelAssetManifest(source, identity, "write-if-missing")).ok).toBe(
       true,
     );
@@ -323,9 +334,17 @@ describe("root and model asset operations", () => {
     const imported = await importModelAssetSource(config, source);
     expect(imported.ok).toBe(true);
     if (!imported.ok) return;
-    expect(await Bun.file(join(config.paths.modelCacheDir, "weights.bin")).text()).toBe(
-      "verified weights",
-    );
+    expect(
+      await Bun.file(
+        join(
+          config.paths.modelCacheDir,
+          "Xenova",
+          "bge-small-en-v1.5",
+          "onnx",
+          config.embedding.quantization === "fp16" ? "model_fp16.onnx" : "model_quantized.onnx",
+        ),
+      ).text(),
+    ).toBe("verified weights");
     expect(await Bun.file(join(imported.value.backup as string, "old.bin")).text()).toBe(
       "old cache",
     );
@@ -578,12 +597,25 @@ describe("running actions and CLI", () => {
     expect(failureProvider.shutdownCalls).toBe(1);
     const bundle = join(fixture, "cli-model-bundle");
     await mkdir(bundle);
-    await writeFile(join(bundle, "weights.bin"), "cli bundle");
+    await mkdir(join(bundle, "Xenova", "bge-small-en-v1.5", "onnx"), { recursive: true });
+    await writeFile(
+      join(
+        bundle,
+        "Xenova",
+        "bge-small-en-v1.5",
+        "onnx",
+        config.embedding.quantization === "fp16" ? "model_fp16.onnx" : "model_quantized.onnx",
+      ),
+      "cli bundle",
+    );
     expect(
       (
         await verifyOrWriteModelAssetManifest(
           bundle,
-          { ...config.embedding, maximumTokens: 512 },
+          {
+            ...config.embedding,
+            maximumTokens: 512,
+          },
           "write-if-missing",
         )
       ).ok,

@@ -21,7 +21,11 @@ export type {
 export { normalizeSourceText } from "./normalization.ts";
 export { createDefaultExtractorRegistry, ExtractorRegistry } from "./registry.ts";
 export { createExtractionPipeline, FileExtractionPipeline } from "./service.ts";
-export { createTransformersTokenCounter, createUnicodeWordTokenCounter } from "./tokenizer.ts";
+export {
+  createTransformersTokenCounter,
+  createUnicodeWordTokenCounter,
+  type TransformersTokenCounterOptions,
+} from "./tokenizer.ts";
 export {
   createWorkerExtractionPipeline,
   type ExtractionWorkerBoundary,

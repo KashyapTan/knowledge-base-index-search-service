@@ -7,8 +7,8 @@ in-file grep views.
 
 Repository content, queries, embeddings, and indexes stay on this machine. KBISS has no telemetry,
 API key, remote inference service, CDN, or remote font. On an online first run, only the pinned
-public embedding model is downloaded from Hugging Face; repository content is never sent with that
-request. Once verified, model loading and all search/index work are local.
+public embedding profile's pinned model revision is downloaded from Hugging Face; repository content
+is never sent with that request. Once verified, model loading and all search/index work are local.
 
 ## Prerequisites
 
@@ -103,8 +103,10 @@ inference.
 Precedence is command-line options, `KBISS_*` environment variables, the per-user `config.json`,
 then defaults. Supported options are `--root`, `--port`, `--config`, `--state-dir`, `--cache-dir`,
 `--model`, `--embedding-device`, `--quantization`, `--vector-dimension`, `--normalization`, and
-`--offline`. `--embedding-device` accepts `auto`, `cpu`, `webgpu`, or `coreml`; `auto` resolves to
-WebGPU on Apple Silicon and CPU elsewhere.
+`--offline`. `--embedding-device` accepts `auto`, `cpu`, `webgpu`, or `coreml`; the selected versioned
+model profile validates the device, dtype, and dimension and supplies safe defaults. `auto` uses
+WebGPU on Apple Silicon only for a reviewed profile path and otherwise uses that profile's default.
+See the [Plan 12 embedding runtime contract](docs/plan-12-versioned-embedding-model-profiles-and-runtime.md).
 
 Every source root uses a conservative cross-language ignore list for dependency trees, virtual
 environments, build output, caches, test reports, user-specific editor/VCS state, local version
@@ -234,7 +236,8 @@ bun run release:gate
 
 `bun run compat` is the explicit network-enabled native compatibility spike. Ordinary tests use
 temporary roots/application-data and deterministic fake embeddings; they do not read or mutate a
-developer repository. The real local-model smoke test remains opt-in for Plan 11.
+developer repository. Real pinned-model smoke tests remain opt-in and require separately prepared,
+verified caches; Plan 12 documents the per-profile cache variables and commands.
 
 The opt-in large-corpus tools require explicit external paths and never write into the indexed or
 KBISS repositories:

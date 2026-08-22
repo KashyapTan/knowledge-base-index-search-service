@@ -1,17 +1,21 @@
 import type { DataType } from "@huggingface/transformers";
-import type { EmbeddingDevice } from "../config/index.ts";
+import type { EmbeddingDevice, EmbeddingProfileCompatibility } from "../config/index.ts";
 import type { DiscoveredFile, FileChange } from "../discovery/index.ts";
 import type { ExtractedFile, ExtractionPipeline, SearchChunk } from "../extraction/index.ts";
 import type { AppError, Result } from "../shared/result.ts";
 
 export interface EmbeddingIdentity {
   readonly device: EmbeddingDevice;
+  readonly maximumTokens: number;
   readonly modelId: string;
+  readonly nativeDimension: number;
+  readonly profile: EmbeddingProfileCompatibility;
   readonly quantization: DataType;
   readonly vectorDimension: number;
-  readonly maximumTokens: number;
   readonly normalization: "l2";
 }
+
+export type EmbeddingVector = readonly number[] | Float32Array;
 
 export interface EmbedOptions {
   readonly signal?: AbortSignal;
@@ -56,11 +60,11 @@ export interface EmbeddingProvider {
   embedDocuments(
     texts: readonly string[],
     options?: EmbedOptions,
-  ): Promise<Result<readonly (readonly number[])[], EmbeddingError>>;
+  ): Promise<Result<readonly EmbeddingVector[], EmbeddingError>>;
   embedQuery(
     text: string,
     options?: Pick<EmbedOptions, "signal">,
-  ): Promise<Result<readonly number[], EmbeddingError>>;
+  ): Promise<Result<EmbeddingVector, EmbeddingError>>;
   shutdown(): Promise<void>;
 }
 
@@ -99,7 +103,7 @@ export interface IndexedChunkRecord {
   readonly ordinal: number;
   readonly displayText: string;
   readonly searchText: string;
-  readonly vector: readonly number[];
+  readonly vector: EmbeddingVector;
   readonly startLine: number;
   readonly endLine: number;
   readonly startOffset: number;

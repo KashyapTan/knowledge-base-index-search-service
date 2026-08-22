@@ -1,3 +1,4 @@
+import type { EmbeddingVector } from "../indexing/index.ts";
 import type { AppError, Result } from "../shared/result.ts";
 
 export type SearchMatchSource = "vector" | "bm25" | "metadata";
@@ -161,7 +162,7 @@ export interface RetrievedCandidatePools {
 export interface CandidateRetriever {
   retrieve(
     query: string,
-    vector: readonly number[],
+    vector: EmbeddingVector,
     formats: readonly string[],
     config: SearchConfig,
     options?: SearchOptions,
