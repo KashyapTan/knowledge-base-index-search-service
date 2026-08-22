@@ -26,7 +26,9 @@ The main page has a search bar and returns the top X distinct files, with the be
 - Database: embedded LanceDB OSS stored locally; do not introduce a database server.
 - Search: BM25 full-text search plus vector similarity, fused with reciprocal rank fusion (RRF), plus explicit filename/path boosting.
 - Embeddings: quantized `bge-small-en-v1.5` through Transformers.js/ONNX is the provisional default.
-- Embedding choice must remain configurable and versioned. The final plan compares BGE small against BGE base on the real corpus before locking the default.
+- Embedding choice must remain configurable and versioned. Plan 11 established the original
+  BGE-small-versus-base decision; Plan 14 reopens the default only through a broader, matched
+  mixed-format model evaluation on the real corpus.
 - Normal execution is `bun run`; do not rely on `bun build --compile`. Transformers.js and native shared libraries currently make single-executable packaging unnecessarily fragile.
 - Use Bun Workers or a proven equivalent boundary for CPU-heavy embedding work so indexing cannot block the local HTTP/UI process.
 
@@ -131,11 +133,15 @@ Testing belongs in every implementation phase beginning with Plan 02; do not def
 - Treat 93% as a quality target, not an invitation to pad coverage with assertions that do not verify behavior. Critical configuration, path-security, indexing, ranking, and content-sanitization branches should be covered even when aggregate coverage is already above the target.
 - Exclude only genuinely trivial or non-testable material such as generated code, type-only declarations, static styling/assets, and minimal process/bootstrap glue. Every coverage exclusion must be narrow, justified, and visible in configuration or documentation.
 - Prefer deterministic unit tests for pure logic, integration tests at database/filesystem/process boundaries, and focused browser tests for user interactions. Do not mock away the boundary that a test is meant to validate.
-- Use temporary directories and fixture repositories. Tests must not read, index, modify, or depend on a developer's personal repositories unless running the explicit opt-in benchmark in Plan 11.
+- Use temporary directories and fixture repositories. Tests must not read, index, modify, or depend
+  on a developer's personal repositories unless running the explicit opt-in benchmarks/evaluations
+  governed by Plans 11 and 14.
 - Tests must not require network access. Exercise the real ONNX model only in a dedicated local-assets integration/smoke suite; use a deterministic fake embedder for most indexing and ranking tests.
 - Every bug fix must include a regression test when the failure is non-trivial and reproducible.
 - At the end of each plan, run the relevant Bun tests with coverage plus the existing typecheck, lint, and build checks. Record any intentional gap or deferred cross-system scenario in that plan's completion notes.
-- Plan 11 remains responsible for closing suite-wide gaps, end-to-end release validation, relevance evaluation, security regression review, and large-corpus benchmarking; it is not the first point at which features receive tests.
+- Plan 11 remains the original-release suite-wide validation and benchmark baseline. Plan 14 owns
+  post-release mixed-format relevance/model validation after Plans 12-13; neither phase is the first
+  point at which its features receive tests.
 
 ## Plan execution rules
 
@@ -148,7 +154,10 @@ Testing belongs in every implementation phase beginning with Plan 02; do not def
 7. Do not add cloud services, telemetry, API keys, ChromaDB, or a second runtime.
 8. Do not hardcode one developer's absolute paths or machine characteristics.
 9. Record important implementation decisions in the relevant plan or project documentation so later agents inherit them.
-10. Implement phase-specific tests alongside every plan from Plan 02 onward and maintain approximately 93% coverage of non-trivial, testable code. Plan 11 completes cross-system validation, relevance evaluation, and large-corpus benchmarking.
+10. Implement phase-specific tests alongside every plan from Plan 02 onward and maintain approximately
+    93% coverage of non-trivial, testable code. Plan 11 records the original cross-system baseline;
+    Plan 14 completes the post-release relevance/model evaluation after the new runtime and throughput
+    work.
 
 ## Ordered implementation plans
 
@@ -163,3 +172,6 @@ Testing belongs in every implementation phase beginning with Plan 02; do not def
 9. `plans/09-file-viewer-renderers-and-grep.md`
 10. `plans/10-local-distribution-operations-and-polish.md`
 11. `plans/11-testing-relevance-evaluation-and-benchmarking.md`
+12. `plans/12-versioned-embedding-model-profiles-and-runtime.md`
+13. `plans/13-pipelined-indexing-throughput-and-incremental-reuse.md`
+14. `plans/14-mixed-format-search-quality-and-model-evaluation.md`

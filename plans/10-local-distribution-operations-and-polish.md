@@ -79,7 +79,10 @@ Target approximately 93% line and function coverage for non-trivial setup, opera
 
 ## Handoff
 
-Plan 11 is the final phase. It validates correctness, security, relevance, and performance against fixtures and the user-designated large external repository, then makes the evidence-based small-versus-base embedding decision.
+Plan 11 is the final phase of the original release. It validates correctness, security, relevance,
+and performance against fixtures and the user-designated large external repository, then makes the
+original evidence-based small-versus-base embedding decision. Plans 12-14 are later post-release
+model-runtime, throughput, and mixed-format relevance phases.
 
 ## Completion notes (2026-08-21)
 

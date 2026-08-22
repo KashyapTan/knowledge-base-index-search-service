@@ -4,7 +4,10 @@
 
 Finish the build with comprehensive automated testing, security regression coverage, corpus-specific relevance evaluation, and reproducible performance benchmarks using both controlled fixtures and the user's large external repository.
 
-This is intentionally the final implementation plan. Plans 02-10 already add phase-specific tests; this phase closes remaining coverage gaps, validates the integrated behavior, and feeds only evidence-backed tuning changes back into the product.
+This was intentionally the final implementation plan for the original release. Plans 12-14 are
+post-release, evidence-driven model-runtime, indexing-throughput, and search-quality phases. Plans
+02-10 already add phase-specific tests; this phase closes the original release gaps, validates the
+integrated behavior, and establishes the baseline those later plans must preserve or improve.
 
 ## Dependencies
 
