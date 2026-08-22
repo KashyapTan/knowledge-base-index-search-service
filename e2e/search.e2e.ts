@@ -90,6 +90,13 @@ test("keyboard search flow uses the real local API contract", async ({ page }) =
     "true",
   );
   await expect(viewerHost.locator("mark.active-match")).toHaveCount(1);
+  await viewerHost.getByTitle("Regular expression").click();
+  await grep.fill("(a+)+$");
+  await expect(
+    viewerHost.getByText(
+      "The regular expression uses a potentially unsafe backtracking construct.",
+    ),
+  ).toBeVisible();
 
   await viewerHost.getByRole("button", { name: "Close viewer" }).click();
   await openActions.nth(2).click();

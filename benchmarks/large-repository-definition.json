@@ -1,0 +1,32 @@
+{
+  "schemaVersion": 1,
+  "ignorePatterns": [
+    "node_modules/",
+    ".venv/",
+    ".pytest_cache/",
+    ".ruff_cache/",
+    "__pycache__/",
+    "dist/",
+    "dist-*/",
+    "build/",
+    "build-*/",
+    "coverage/",
+    "test-results/",
+    "playwright-report/",
+    "codex-temp/",
+    "user_data/",
+    "assets/",
+    "demos/",
+    ".DS_Store"
+  ],
+  "queries": [
+    "configuration settings",
+    "startup lifecycle",
+    "error recovery",
+    "security policy",
+    "user interface",
+    "background tasks"
+  ],
+  "warmRuns": 20,
+  "annThreshold": 50000
+}

@@ -16,9 +16,11 @@ import type {
 
 interface MutableProgress {
   phase: IndexingProgress["phase"];
+  currentFile?: string;
   totalFiles: number;
   processedFiles: number;
   unchangedFiles: number;
+  skippedFiles: number;
   failedFiles: number;
   deletedFiles: number;
   totalChunks: number;
@@ -109,9 +111,11 @@ function chunkRecord(
 function snapshot(progress: MutableProgress): IndexingProgress {
   return {
     phase: progress.phase,
+    ...(progress.currentFile === undefined ? {} : { currentFile: progress.currentFile }),
     totalFiles: progress.totalFiles,
     processedFiles: progress.processedFiles,
     unchangedFiles: progress.unchangedFiles,
+    skippedFiles: progress.skippedFiles,
     failedFiles: progress.failedFiles,
     deletedFiles: progress.deletedFiles,
     totalChunks: progress.totalChunks,
@@ -175,6 +179,7 @@ export class RepositoryIndexingService implements IndexingService {
       totalFiles: files.length + deletions.length,
       processedFiles: 0,
       unchangedFiles: 0,
+      skippedFiles: 0,
       failedFiles: 0,
       deletedFiles: 0,
       totalChunks: 0,
@@ -185,6 +190,7 @@ export class RepositoryIndexingService implements IndexingService {
       errors: [],
     };
     const startedAt = this.#now();
+    let searchDataChanged = false;
     this.#publish(progress);
     const warm = await this.#dependencies.embeddings.warmUp();
     if (!warm.ok) {
@@ -193,12 +199,16 @@ export class RepositoryIndexingService implements IndexingService {
 
     for (const change of deletions) {
       if (this.#cancelled(signal, progress)) return this.#cancelError();
+      progress.currentFile = change.relativePath;
       progress.phase = "deleting";
       this.#publish(progress);
       const deleted = await this.#dependencies.store.deleteFile(change.fileId);
       if (!deleted.ok)
         this.#recordError(progress, change.fileId, change.relativePath, deleted.error);
-      else progress.deletedFiles += 1;
+      else {
+        progress.deletedFiles += 1;
+        searchDataChanged = true;
+      }
       progress.processedFiles += 1;
       this.#estimate(progress, startedAt);
       this.#publish(progress);
@@ -207,24 +217,35 @@ export class RepositoryIndexingService implements IndexingService {
     const ordered = [...files].sort((left, right) =>
       left.relativePath.localeCompare(right.relativePath),
     );
+    const existing = await this.#dependencies.store.getFiles(ordered.map((file) => file.fileId));
+    if (!existing.ok) return err({ code: "INDEXING_FATAL", message: existing.error.message });
+    const existingById = new Map(existing.value.map((file) => [file.fileId, file]));
     for (const file of ordered) {
       if (this.#cancelled(signal, progress)) return this.#cancelError();
-      const outcome = await this.#indexOne(file, progress, signal);
+      progress.currentFile = file.relativePath;
+      this.#publish(progress);
+      const outcome = await this.#indexOne(file, existingById.get(file.fileId), progress, signal);
       if (!outcome.ok && outcome.error.code === "INDEXING_CANCELLED") {
         progress.phase = "cancelled";
+        delete progress.currentFile;
         this.#publish(progress);
         return outcome;
       }
+      if (!outcome.ok) return outcome;
+      searchDataChanged ||= outcome.value;
       progress.processedFiles += 1;
       this.#estimate(progress, startedAt);
       this.#publish(progress);
     }
 
+    delete progress.currentFile;
     progress.phase = "finalizing";
     this.#publish(progress);
-    const refreshed = await this.#dependencies.store.refreshSearchIndexes();
-    if (!refreshed.ok) {
-      return err({ code: "INDEXING_FATAL", message: refreshed.error.message });
+    if (searchDataChanged) {
+      const refreshed = await this.#dependencies.store.refreshSearchIndexes();
+      if (!refreshed.ok) {
+        return err({ code: "INDEXING_FATAL", message: refreshed.error.message });
+      }
     }
     progress.phase = "complete";
     delete progress.estimatedCompletionMs;
@@ -234,44 +255,56 @@ export class RepositoryIndexingService implements IndexingService {
 
   async #indexOne(
     file: DiscoveredFile,
+    existingRecord: IndexedFileRecord | undefined,
     progress: MutableProgress,
     signal?: AbortSignal,
-  ): Promise<Result<void, IndexingError>> {
+  ): Promise<Result<boolean, IndexingError>> {
     if (file.readStatus !== "ready" || !file.fingerprint.contentHash) {
       const issue = {
         code: "FILE_NOT_READY",
         message: file.lastError ?? "The discovered file is not ready for indexing.",
       };
+      if (file.readStatus === "unsupported" || file.readStatus === "malformed") {
+        // Expected non-text content is a skip, not an indexing incident. markFileFailed still
+        // removes stale chunks if a formerly searchable file became binary or unsupported.
+        progress.skippedFiles += 1;
+        if (!existingRecord || existingRecord.indexStatus === "failed") return ok(false);
+        const stored = await this.#dependencies.store.markFileFailed(file, issue);
+        if (!stored.ok) {
+          this.#recordError(progress, file.fileId, file.relativePath, stored.error);
+          return ok(false);
+        }
+        return ok(true);
+      }
       const stored = await this.#dependencies.store.markFileFailed(file, issue);
-      this.#recordError(progress, file.fileId, file.relativePath, stored.ok ? issue : stored.error);
-      return ok(undefined);
-    }
-    const existing = await this.#dependencies.store.getFile(file.fileId);
-    if (!existing.ok) {
-      this.#recordError(progress, file.fileId, file.relativePath, existing.error);
-      return ok(undefined);
+      if (!stored.ok) {
+        this.#recordError(progress, file.fileId, file.relativePath, stored.error);
+      } else {
+        this.#recordError(progress, file.fileId, file.relativePath, issue);
+      }
+      return ok(stored.ok);
     }
     const isCompatible =
-      existing.value?.indexStatus === "indexed" &&
-      existing.value.contentHash === file.fingerprint.contentHash &&
-      existing.value.extractorVersion === this.#config.index.extractorVersion &&
-      existing.value.chunkerVersion === this.#config.index.chunkerVersion &&
-      existing.value.indexSchemaVersion === this.#config.index.schemaVersion;
-    if (isCompatible && existing.value?.fingerprintHash === stableFingerprint(file)) {
+      existingRecord?.indexStatus === "indexed" &&
+      existingRecord.contentHash === file.fingerprint.contentHash &&
+      existingRecord.extractorVersion === this.#config.index.extractorVersion &&
+      existingRecord.chunkerVersion === this.#config.index.chunkerVersion &&
+      existingRecord.indexSchemaVersion === this.#config.index.schemaVersion;
+    if (isCompatible && existingRecord?.fingerprintHash === stableFingerprint(file)) {
       progress.unchangedFiles += 1;
-      return ok(undefined);
+      return ok(false);
     }
 
-    if (isCompatible && existing.value) {
+    if (isCompatible && existingRecord) {
       const chunks = await this.#dependencies.store.getChunks(file.fileId);
       if (!chunks.ok) {
         this.#recordError(progress, file.fileId, file.relativePath, chunks.error);
-        return ok(undefined);
+        return ok(false);
       }
       progress.phase = "committing";
       this.#publish(progress);
       const metadataOnly: IndexedFileRecord = {
-        ...existing.value,
+        ...existingRecord,
         fingerprintHash: stableFingerprint(file),
         size: file.fingerprint.size,
         modifiedAtMs: file.fingerprint.modifiedAtMs,
@@ -284,7 +317,7 @@ export class RepositoryIndexingService implements IndexingService {
       if (!committed.ok)
         this.#recordError(progress, file.fileId, file.relativePath, committed.error);
       else progress.unchangedFiles += 1;
-      return ok(undefined);
+      return ok(false);
     }
 
     progress.phase = "extracting";
@@ -298,14 +331,14 @@ export class RepositoryIndexingService implements IndexingService {
         file.relativePath,
         marked.ok ? extraction.error : marked.error,
       );
-      return ok(undefined);
+      return ok(marked.ok);
     }
     progress.totalChunks += extraction.value.chunks.length;
 
     const priorChunks = await this.#dependencies.store.getChunks(file.fileId);
     if (!priorChunks.ok) {
       this.#recordError(progress, file.fileId, file.relativePath, priorChunks.error);
-      return ok(undefined);
+      return ok(false);
     }
     const reusable = new Map(
       priorChunks.value
@@ -343,7 +376,7 @@ export class RepositoryIndexingService implements IndexingService {
           file.relativePath,
           marked.ok ? result.error : marked.error,
         );
-        return ok(undefined);
+        return ok(marked.ok);
       }
       embedded = result.value;
       progress.embeddedChunks += embedded.length;
@@ -360,7 +393,7 @@ export class RepositoryIndexingService implements IndexingService {
           code: "INFERENCE_FAILED",
           message: "An embedding result was missing for a prepared chunk.",
         });
-        return ok(undefined);
+        return ok(false);
       }
       if (reused) progress.reusedChunks += 1;
       records.push(chunkRecord(this.#config, file, chunk, vector));
@@ -375,10 +408,10 @@ export class RepositoryIndexingService implements IndexingService {
     );
     if (!committed.ok) {
       this.#recordError(progress, file.fileId, file.relativePath, committed.error);
-      return ok(undefined);
+      return ok(false);
     }
     progress.committedChunks += records.length;
-    return ok(undefined);
+    return ok(true);
   }
 
   #recordError(
@@ -394,6 +427,7 @@ export class RepositoryIndexingService implements IndexingService {
   #cancelled(signal: AbortSignal | undefined, progress: MutableProgress): boolean {
     if (!signal?.aborted) return false;
     progress.phase = "cancelled";
+    delete progress.currentFile;
     this.#publish(progress);
     return true;
   }

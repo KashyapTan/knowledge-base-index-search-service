@@ -432,6 +432,7 @@ export function createRepositoryScanner(
   options: Omit<DiscoveryScannerOptions, "excludedCanonicalPaths"> = {},
 ): RepositoryScanner {
   return new RepositoryScanner(config.sourceRoots[0], manifest, {
+    ignorePatterns: config.ignorePatterns,
     ...options,
     excludedCanonicalPaths: [config.paths.applicationStateDir, config.paths.applicationCacheDir],
   });

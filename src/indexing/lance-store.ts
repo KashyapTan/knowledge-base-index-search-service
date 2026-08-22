@@ -354,15 +354,28 @@ export class LanceIndexStore implements IndexStore {
   }
 
   async getFile(fileId: string): Promise<Result<IndexedFileRecord | undefined, IndexStoreError>> {
+    const files = await this.getFiles([fileId]);
+    return files.ok ? ok(files.value[0]) : files;
+  }
+
+  async getFiles(
+    fileIds: readonly string[],
+  ): Promise<Result<readonly IndexedFileRecord[], IndexStoreError>> {
+    if (fileIds.length === 0) return ok([]);
     try {
-      const rows = (await this.#files
-        .query()
-        .where(`file_id = ${sqlString(fileId)}`)
-        .limit(1)
-        .toArray()) as Record<string, unknown>[];
-      return ok(rows[0] ? toFile(rows[0]) : undefined);
+      const records: IndexedFileRecord[] = [];
+      const unique = [...new Set(fileIds)];
+      for (let offset = 0; offset < unique.length; offset += 500) {
+        const batch = unique.slice(offset, offset + 500);
+        const rows = (await this.#files
+          .query()
+          .where(`file_id IN (${batch.map(sqlString).join(", ")})`)
+          .toArray()) as Record<string, unknown>[];
+        records.push(...rows.map(toFile));
+      }
+      return ok(records);
     } catch {
-      return storeFailure("INDEX_READ_FAILED", "The indexed file record could not be read.");
+      return storeFailure("INDEX_READ_FAILED", "The indexed file records could not be read.");
     }
   }
 

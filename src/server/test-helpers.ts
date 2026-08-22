@@ -112,6 +112,7 @@ const COMPLETE_INDEXING_PROGRESS: IndexingProgress = {
   totalFiles: 0,
   processedFiles: 0,
   unchangedFiles: 0,
+  skippedFiles: 0,
   failedFiles: 0,
   deletedFiles: 0,
   totalChunks: 0,
@@ -159,6 +160,10 @@ export class FixtureStore implements IndexStore {
   closes = 0;
   async getFile() {
     return ok(undefined);
+  }
+
+  async getFiles() {
+    return ok([]);
   }
   async getChunks() {
     return ok([] as IndexedChunkRecord[]);

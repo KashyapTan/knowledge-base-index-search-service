@@ -77,6 +77,7 @@ describe("operational diagnostics", () => {
       applicationVersion: "0.1.0",
       sourceRoot: join(fixture, "root"),
       offline: false,
+      ignorePatterns: config.ignorePatterns,
       paths: { indexDir: config.paths.indexDir, modelCacheDir: config.paths.modelCacheDir },
     });
     const report = await collectDiagnostics(config);
@@ -255,7 +256,10 @@ describe("root and model asset operations", () => {
     const configFile = join(fixture, "user", "config.json");
     await mkdir(nextRoot);
     await mkdir(join(fixture, "user"));
-    await writeFile(configFile, JSON.stringify({ port: 4123 }));
+    await writeFile(
+      configFile,
+      JSON.stringify({ port: 4123, ignorePatterns: ["node_modules/", "generated/"] }),
+    );
     const selected = await selectConfiguredRoot(nextRoot, {
       configFile,
       cwd: fixture,
@@ -263,7 +267,11 @@ describe("root and model asset operations", () => {
       platform: "linux",
     });
     expect(selected).toEqual({ ok: true, value: { configFile, root: nextRoot } });
-    expect(JSON.parse(await readFile(configFile, "utf8"))).toEqual({ port: 4123, root: nextRoot });
+    expect(JSON.parse(await readFile(configFile, "utf8"))).toEqual({
+      port: 4123,
+      ignorePatterns: ["node_modules/", "generated/"],
+      root: nextRoot,
+    });
     await writeFile(configFile, "{");
     expect(
       await selectConfiguredRoot(nextRoot, { configFile, cwd: fixture, homeDir: fixture }),

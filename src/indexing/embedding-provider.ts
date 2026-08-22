@@ -98,7 +98,7 @@ export class TransformersEmbeddingProvider implements EmbeddingProvider {
   }
 
   encodeQuery(text: string): string {
-    // BGE v1.5 works without an instruction; Plan 11 decides whether corpus evidence justifies one.
+    // Plan 11 retained the BGE v1.5 instruction-free convention used by both benchmarked models.
     return text;
   }
 

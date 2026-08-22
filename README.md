@@ -95,6 +95,32 @@ Precedence is command-line options, `KBISS_*` environment variables, the per-use
 then defaults. Supported options are `--root`, `--port`, `--config`, `--state-dir`, `--cache-dir`,
 `--model`, `--quantization`, `--vector-dimension`, `--normalization`, and `--offline`.
 
+Every source root uses a conservative cross-language ignore list for dependency trees, virtual
+environments, build output, caches, test reports, user-specific editor/VCS state, local version
+manager installations, deployment state, and compiled artifacts. It covers the common generated
+output of JavaScript/TypeScript, Python, Rust, Java/Kotlin/Scala, C/C++/CMake/Make, Go, Ruby, PHP,
+.NET, Swift/Xcode, Dart/Flutter, Elixir/Erlang, Haskell, OCaml, Terraform, and major production web
+frameworks. Filenames containing `temp` in any casing are also ignored. The policy is curated
+against GitHub's evergreen
+[`gitignore` templates](https://github.com/github/gitignore) but deliberately keeps source files,
+manifests, `Makefile`, lockfiles, build definitions, migrations, team editor configuration, and
+version selectors searchable. View the complete resolved list with `bun run config`.
+
+Set `ignorePatterns` in the per-user JSON configuration to replace the defaults. Patterns are
+root-relative globs; a trailing slash means a directory. Copy the resolved list and remove any rule
+whose content should be searchable, add project-specific generated paths, or use an empty array to
+disable every configurable default:
+
+```json
+{
+  "ignorePatterns": ["node_modules/", ".venv/", "dist/", "build/", "generated/**"]
+}
+```
+
+`.git` internals and KBISS's external state/cache locations remain unconditional safety exclusions.
+Changing the list is incremental: the next scan removes newly ignored records and indexes newly
+included files without requiring a manual rebuild.
+
 Save a new default root after validating it:
 
 ```sh
@@ -191,12 +217,23 @@ bun run typecheck
 bun run test:coverage
 bun run build
 bun run test:e2e
+bun run test:relevance
+bun run release:gate
 ```
 
 `bun run compat` is the explicit network-enabled native compatibility spike. Ordinary tests use
 temporary roots/application-data and deterministic fake embeddings; they do not read or mutate a
 developer repository. The real local-model smoke test remains opt-in for Plan 11.
 
-Detailed subsystem contracts are in [`docs/`](docs/). Plan 10 operational decisions and the Plan 11
-handoff are recorded in
-[`docs/plan-10-local-distribution-operations-and-polish.md`](docs/plan-10-local-distribution-operations-and-polish.md).
+The opt-in large-corpus tools require explicit external paths and never write into the indexed or
+KBISS repositories:
+
+```sh
+bun run benchmark:large --root /path/to/large-repo --output /external/reports/small.json
+bun run benchmark:models --root /path/to/large-repo --output-dir /external/model-comparison
+```
+
+Pass `--allow-download` only when model acquisition is intended, and `--judgments` only for a local
+reviewed judgment file that should remain outside version control. The benchmark records anonymized
+performance-query labels in its report. See the final Plan 11 baseline and model decision in
+[`docs/plan-11-testing-relevance-evaluation-and-benchmarking.md`](docs/plan-11-testing-relevance-evaluation-and-benchmarking.md).

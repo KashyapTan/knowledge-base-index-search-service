@@ -57,10 +57,17 @@ function StatusPanel({
           <progress value={progress.processedFiles} max={progressMaximum}>
             {progress.processedFiles} of {progress.totalFiles}
           </progress>
-          <span>
-            {progress.processedFiles} of {progress.totalFiles} files · {progress.committedChunks}{" "}
-            chunks committed
-          </span>
+          <div className="progress-details">
+            <span>
+              {progress.processedFiles} of {progress.totalFiles} files · {progress.committedChunks}{" "}
+              chunks committed
+            </span>
+            {progress.currentFile ? (
+              <span className="current-file">
+                Current file: <code title={progress.currentFile}>{progress.currentFile}</code>
+              </span>
+            ) : null}
+          </div>
         </div>
       ) : null}
       {connectionMessage ? <p className="connection-message">{connectionMessage}</p> : null}

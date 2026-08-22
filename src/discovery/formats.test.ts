@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { DEFAULT_IGNORE_PATTERNS } from "../config/index.ts";
 import { formatForExtension, inspectTextBytes, normalizedExtension } from "./formats.ts";
 import { createFileId, normalizeRelativePath } from "./identity.ts";
 import { createIgnoreMatcher } from "./ignore.ts";
@@ -90,5 +91,89 @@ describe("stable paths, IDs, and ignores", () => {
     expect(matcher.ignores(".hidden.md", false)).toBe(false);
     expect(matcher.ignores("source/.git/config", false)).toBe(true);
     expect(matcher.ignores("scratch.txt", false)).toBe(false);
+  });
+
+  test("ignores generated output across major language and production ecosystems by default", () => {
+    const matcher = createIgnoreMatcher(DEFAULT_IGNORE_PATTERNS);
+    for (const [path, isDirectory] of [
+      ["node_modules", true],
+      ["web/.yarn/cache", true],
+      ["services/api/.venv", true],
+      ["python/package.egg-info", true],
+      ["web/dist", true],
+      ["java/target", true],
+      ["android/.gradle", true],
+      ["rust/target", true],
+      ["cpp/cmake-build-debug", true],
+      ["cpp/CMakeFiles", true],
+      ["go/vendor", true],
+      ["ruby/.bundle", true],
+      ["dart/.dart_tool", true],
+      ["elixir/_build", true],
+      ["haskell/.stack-work", true],
+      ["ios/Carthage/Build", true],
+      ["infra/.terraform", true],
+      ["python/__pycache__", true],
+      ["frontend/.next", true],
+      ["frontend/.vercel", true],
+      ["frontend/storybook-static", true],
+      ["tests/playwright-report", true],
+      ["native/output.o", false],
+      ["java/App.class", false],
+      ["dotnet/App.dll", false],
+      ["rust/module.wasm", false],
+      ["infra/terraform.tfstate", false],
+      ["workspace/.idea/workspace.xml", false],
+      ["workspace/.asdf", true],
+      ["src/temporary-worker.ts", false],
+      ["docs/paymentTEMPnotes.md", false],
+      ["nested/preTeMpPost.txt", false],
+    ] as const) {
+      expect(matcher.ignores(path, isDirectory)).toBe(true);
+    }
+  });
+
+  test("retains manifests, source, build definitions, lockfiles, and version selectors", () => {
+    const matcher = createIgnoreMatcher(DEFAULT_IGNORE_PATTERNS);
+    for (const path of [
+      "Makefile",
+      "CMakeLists.txt",
+      "compile_commands.json",
+      "meson.build",
+      "package.json",
+      "package-lock.json",
+      "pnpm-lock.yaml",
+      "pyproject.toml",
+      "poetry.lock",
+      "Cargo.toml",
+      "Cargo.lock",
+      "go.mod",
+      "go.sum",
+      "pom.xml",
+      "build.gradle.kts",
+      "gradle/wrapper/gradle-wrapper.properties",
+      "Gemfile.lock",
+      "composer.lock",
+      "App.csproj",
+      "Package.resolved",
+      "pubspec.lock",
+      ".terraform.lock.hcl",
+      "Dockerfile",
+      "compose.yaml",
+      ".nvmrc",
+      ".python-version",
+      ".ruby-version",
+      ".java-version",
+      ".tool-versions",
+      "rust-toolchain.toml",
+      ".sdkmanrc",
+      ".vscode/settings.json",
+      ".idea/compiler.xml",
+      "migrations/001-create-users.sql",
+    ]) {
+      expect(matcher.ignores(path, false)).toBe(false);
+    }
+    expect(matcher.ignores("src/build-tools/index.ts", false)).toBe(false);
+    expect(matcher.ignores("docs/dependency-versions.md", false)).toBe(false);
   });
 });

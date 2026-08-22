@@ -163,3 +163,31 @@ The release gate should require:
 - The final model, chunk policy, fusion settings, and index strategy are selected from recorded results.
 - A repeatable baseline report and release gate exist for future agents.
 - Suite-wide coverage is approximately 93% for non-trivial code without low-value padding, and critical branches have explicit behavioral tests.
+
+## Completion notes (2026-08-21)
+
+- Added a governed LCOV release threshold, reviewed every exclusion, and retained direct behavioral
+  tests for critical security, concurrency, ranking, recovery, cancellation, and destructive paths.
+  The final governed report covers 82 application files at 95.07% lines and 96.02% functions.
+- Added the reviewed mixed-format controlled corpus, deterministic offline semantic provider,
+  Recall@5/10, MRR, distinct-file and section metrics, plus an integrated real-filesystem/LanceDB
+  mutation test. Controlled relevance is 1.000 Recall@5/10 and MRR across eight judgments.
+- Closed three evidence-found gaps: long-lived LanceDB retrievers now refresh to the latest committed
+  snapshot; unsupported binaries are reported as skips instead of indexing failures while stale
+  chunks are still removed; batched file-record reads reduced Xpdite no-change reconciliation from
+  about 21.5 seconds to 241.7 ms without changing relevance.
+- Added bounded browser regex execution: unsafe backtracking constructs are rejected, all remaining
+  regex work is isolated in a disposable Worker, and a one-second deadline terminates residual cases.
+- Added reproducible, path-safe large-corpus/model benchmark tooling, external scratch mutation
+  timing, report schemas/renderers, severe-regression validation, and core/full release-gate commands.
+- Benchmarked the user-designated Xpdite revision read-only: 586 supported files, 6.6 MiB, 13,003
+  chunks, zero failures, unchanged Git status, and exact vector search below the 50,000-chunk ANN
+  threshold. Raw corpus judgments/reports and every absolute path remain outside the repository.
+- Compared identical q8 BGE small/base indexes. Base delivered no Recall@5 gain, regressed Recall@10
+  and MRR, indexed 42% slower, used about 0.9 GiB more peak RSS, and produced a 20% larger index.
+  BGE small, 384 dimensions, instruction-free encoding, 400/50 chunking, current RRF/path boosts, and
+  exact vector search remain the final defaults. Detailed evidence and limitations are recorded in
+  `docs/plan-11-testing-relevance-evaluation-and-benchmarking.md`.
+- The full release gate passes 353 automated tests plus the dedicated cached real-ONNX smoke, the
+  production build, Playwright browser flow, operations smoke, controlled relevance, external
+  benchmark/model evidence checks, and the native compatibility check on macOS arm64.

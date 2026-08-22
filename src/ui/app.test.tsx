@@ -197,9 +197,11 @@ describe("Plan 08 React search experience", () => {
       startup: { phase: "indexing", changedAt: 1, issues: [] },
       indexing: {
         phase: "embedding",
+        currentFile: "src/workers/very-long-indexing-file.ts",
         totalFiles: 8,
         processedFiles: 3,
         unchangedFiles: 1,
+        skippedFiles: 0,
         failedFiles: 1,
         deletedFiles: 0,
         totalChunks: 20,
@@ -220,12 +222,29 @@ describe("Plan 08 React search experience", () => {
     await renderReady(api);
     expect(screen.getByText("Building the local index")).toBeTruthy();
     expect(screen.getByText(/3 of 8 files · 7 chunks committed/)).toBeTruthy();
+    const currentFile = screen.getByText("src/workers/very-long-indexing-file.ts");
+    expect(currentFile.getAttribute("title")).toBe("src/workers/very-long-indexing-file.ts");
     expect(screen.getByText(/Results may be incomplete/)).toBeTruthy();
     fireEvent.click(screen.getByText("1 isolated issue"));
     expect(screen.getByText(/broken\/really-long-file.md/)).toBeTruthy();
 
     act(() => api.connectionListener?.("Reconnecting to local progress updates…"));
     expect(screen.getByText("Reconnecting to local progress updates…")).toBeTruthy();
+    const initialProgress = api.status.indexing;
+    if (!initialProgress) throw new Error("Expected fixture indexing progress.");
+    act(() =>
+      api.emit({
+        type: "indexing",
+        progress: {
+          ...initialProgress,
+          phase: "committing",
+          currentFile: "docs/next-file.md",
+          processedFiles: 4,
+        },
+      }),
+    );
+    expect(screen.getByText("docs/next-file.md")).toBeTruthy();
+    expect(screen.queryByText("src/workers/very-long-indexing-file.ts")).toBeNull();
     act(() =>
       api.emit({
         type: "startup",

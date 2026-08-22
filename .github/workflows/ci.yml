@@ -39,8 +39,11 @@ jobs:
       - name: Typecheck
         run: bun run typecheck
 
-      - name: Run tests
-        run: bun run test
+      - name: Run tests and enforce coverage governance
+        run: bun run test:coverage
+
+      - name: Run controlled relevance evaluation
+        run: bun run test:relevance
 
       - name: Run controlled setup and offline-restart smoke
         run: bun run smoke:operations

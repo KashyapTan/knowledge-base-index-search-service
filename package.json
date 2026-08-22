@@ -28,7 +28,11 @@
     "test": "\"$npm_execpath\" test",
     "test:ui": "\"$npm_execpath\" test src/ui",
     "test:e2e": "playwright test",
-    "test:coverage": "\"$npm_execpath\" test --coverage --coverage-reporter=text",
+    "test:coverage": "\"$npm_execpath\" test --coverage --coverage-reporter=text --coverage-reporter=lcov && \"$npm_execpath\" run scripts/check-coverage.ts coverage/lcov.info",
+    "test:relevance": "\"$npm_execpath\" run scripts/evaluate-relevance.ts",
+    "benchmark:large": "\"$npm_execpath\" run scripts/benchmark-large.ts",
+    "benchmark:models": "\"$npm_execpath\" run scripts/benchmark-models.ts",
+    "release:gate": "\"$npm_execpath\" run scripts/release-gate.ts",
     "smoke:operations": "\"$npm_execpath\" run scripts/operations-smoke.ts",
     "compat": "\"$npm_execpath\" run build:ui && \"$npm_execpath\" run scripts/compatibility-check.ts"
   },
