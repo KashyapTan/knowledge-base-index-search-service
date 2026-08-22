@@ -43,7 +43,7 @@ Set timeout_ms before retrying.
 
 \`\`\`mermaid
 flowchart LR
-  Search --> Viewer
+  Search["Search\\nIndex"] --> Viewer["File\\nViewer"] --> DB[("SQLite\\nMessages · History · Events")]
 \`\`\`
 
 \`\`\`plantuml
@@ -145,7 +145,7 @@ services.search.responseFactory = (request): SearchResponse => ({
       excerpts: [
         {
           chunkId: "client-primary",
-          text: "export const timeout_ms = 5000;",
+          text: `export const timeout_ms = "${"x".repeat(4_000)}";`,
           startLine: 1,
           endLine: 1,
           startOffset: 0,

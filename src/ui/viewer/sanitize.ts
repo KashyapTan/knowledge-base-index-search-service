@@ -41,6 +41,30 @@ const RESOURCE_ATTRIBUTES = new Set([
   "xlink:href",
 ]);
 
+const UNSAFE_CSS_RESOURCE = /(?:@import|url\((?!\s*['"]?#))/iu;
+const CYLINDER_PATH = /^M0,[\d.eE+-]+\s+a/iu;
+const TRANSLATE = /^translate\(\s*[-\d.eE+]+\s*,\s*([\d.eE+-]+)\s*\)$/iu;
+
+function centerMultilineCylinderLabels(document: Document): void {
+  for (const node of document.querySelectorAll("g.node")) {
+    const shape = [...node.children].find(
+      (child) =>
+        child.tagName.toLocaleLowerCase() === "path" &&
+        child.classList.contains("label-container") &&
+        CYLINDER_PATH.test(child.getAttribute("d") ?? ""),
+    );
+    if (!shape) continue;
+    const label = [...node.children].find(
+      (child) => child.tagName.toLocaleLowerCase() === "g" && child.classList.contains("label"),
+    );
+    if (!label || label.querySelectorAll("tspan.text-outer-tspan").length < 2) continue;
+    const translatedY = TRANSLATE.exec(label.getAttribute("transform") ?? "")?.[1];
+    if (!translatedY) continue;
+    label.setAttribute("transform", `translate(0, ${translatedY})`);
+    for (const text of label.querySelectorAll("text")) text.setAttribute("text-anchor", "middle");
+  }
+}
+
 function sanitizeElement(element: Element): void {
   const tag = element.tagName.toLocaleLowerCase();
   if (REMOVED_ELEMENTS.has(tag)) {
@@ -120,17 +144,28 @@ export function sanitizeDiagramSvg(svg: string): string {
     element.remove();
   }
   for (const element of [...parsed.querySelectorAll("*")]) {
+    if (
+      element.tagName.toLocaleLowerCase() === "style" &&
+      UNSAFE_CSS_RESOURCE.test(element.textContent ?? "")
+    ) {
+      element.remove();
+      continue;
+    }
     for (const attribute of [...element.attributes]) {
       const name = attribute.name.toLocaleLowerCase();
       const value = attribute.value.trim();
       if (
         name.startsWith("on") ||
-        (name === "style" && /(?:@import|url\((?!\s*['"]?#))/iu.test(value)) ||
+        (name === "style" && UNSAFE_CSS_RESOURCE.test(value)) ||
         ((name === "href" || name === "xlink:href") && !value.startsWith("#"))
       ) {
         element.removeAttribute(attribute.name);
       }
     }
   }
+  // Mermaid 11 offsets multiline plain-SVG labels to the left for legacy cylinder nodes even
+  // though the cylinder itself was sized around the centered text. Correct that renderer defect
+  // after sanitization without enabling foreignObject/HTML labels.
+  centerMultilineCylinderLabels(parsed);
   return new XMLSerializer().serializeToString(parsed.documentElement);
 }

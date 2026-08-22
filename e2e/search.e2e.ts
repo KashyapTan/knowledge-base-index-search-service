@@ -41,6 +41,11 @@ test("keyboard search flow uses the real local API contract", async ({ page }) =
   await expect(page.getByRole("heading", { name: "3 results" })).toBeVisible();
   await expect(page.getByRole("article")).toHaveCount(3);
   await expect(page.locator("mark")).toHaveCount(3);
+  const pageWidth = await page.evaluate(() => ({
+    client: document.documentElement.clientWidth,
+    scroll: document.documentElement.scrollWidth,
+  }));
+  expect(pageWidth.scroll).toBeLessThanOrEqual(pageWidth.client);
 
   await search.press("ArrowDown");
   const openActions = page.getByRole("button", { name: "Open full file" });
@@ -78,7 +83,26 @@ test("keyboard search flow uses the real local API contract", async ({ page }) =
   await expect(viewerHost.getByRole("figure", { name: "Mermaid diagram" })).toBeVisible({
     timeout: 15_000,
   });
-  await expect(viewerHost.locator(".mermaid-diagram svg")).toBeVisible();
+  const diagram = viewerHost.getByRole("img", { name: "Rendered Mermaid diagram" });
+  await expect(diagram).toBeVisible();
+  await expect(diagram).toHaveAttribute("src", /^data:image\/svg\+xml;charset=utf-8,/u);
+  const diagramSvg = await diagram.evaluate((image) => {
+    const source = image.getAttribute("src") ?? "";
+    return decodeURIComponent(source.slice(source.indexOf(",") + 1));
+  });
+  expect(diagramSvg).not.toContain("\\n");
+  expect(diagramSvg).not.toContain("&lt;br");
+  expect(diagramSvg.match(/<tspan/gu)?.length ?? 0).toBeGreaterThanOrEqual(4);
+  const databaseLabel = await page.evaluate((svg) => {
+    const parsed = new DOMParser().parseFromString(svg, "image/svg+xml");
+    const label = parsed.querySelector('[id^="flowchart-DB-"] > g.label');
+    return {
+      transform: label?.getAttribute("transform"),
+      anchor: label?.querySelector("text")?.getAttribute("text-anchor"),
+    };
+  }, diagramSvg);
+  expect(databaseLabel.transform).toMatch(/^translate\(0,/u);
+  expect(databaseLabel.anchor).toBe("middle");
   await expect(viewerHost.getByText(/plantuml diagram source/)).toBeVisible();
 
   const grep = viewerHost.getByRole("searchbox", { name: "Find in file" });

@@ -252,6 +252,11 @@ progress {
   padding-left: 1.2rem;
 }
 
+.result-list > li {
+  min-width: 0;
+  max-width: 100%;
+}
+
 .diagnostics li + li {
   margin-top: 0.45rem;
 }
@@ -394,6 +399,8 @@ kbd {
 }
 
 .results-region {
+  min-width: 0;
+  max-width: 100%;
   min-height: 18rem;
   margin-top: 2.2rem;
 }
@@ -474,6 +481,9 @@ kbd {
 
 .result-list {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  min-width: 0;
+  max-width: 100%;
   gap: 1rem;
   margin: 1rem 0 0;
   padding: 0;
@@ -481,7 +491,9 @@ kbd {
 }
 
 .result-card {
+  width: 100%;
   min-width: 0;
+  max-width: 100%;
   overflow: hidden;
   border: 1px solid #b5c0b8;
   border-radius: 0.8rem;
@@ -534,6 +546,8 @@ kbd {
 }
 
 .excerpt {
+  min-width: 0;
+  max-width: 100%;
   padding: 0.8rem 1.1rem 1rem;
   border-top: 1px solid #e1e6e2;
 }
@@ -556,6 +570,9 @@ kbd {
 
 .excerpt-text {
   display: -webkit-box;
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
   max-height: 10.8rem;
   margin: 0.7rem 0 0;
   overflow: hidden;
@@ -882,9 +899,10 @@ mark {
 }
 
 .markdown-preview {
-  max-width: 78ch;
+  width: 100%;
+  max-width: none;
   margin: 0 auto;
-  padding: clamp(1.5rem, 5vw, 4rem);
+  padding: 1.5rem 1%;
   color: #1c2720;
   font-size: 1rem;
   line-height: 1.72;
@@ -1002,9 +1020,11 @@ mark {
   text-align: center;
 }
 
-.mermaid-diagram svg {
+.mermaid-diagram img {
+  display: block;
   max-width: 100%;
   height: auto;
+  margin: 0 auto;
 }
 
 .html-preview-shell {

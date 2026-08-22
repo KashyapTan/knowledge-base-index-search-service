@@ -1,6 +1,12 @@
 import { useEffect, useId, useState } from "react";
 import { sanitizeDiagramSvg } from "./sanitize.ts";
 
+export function normalizeMermaidSource(source: string): string {
+  // Mermaid's SVG text mode does not interpret the common `\n` label convention. A safe br tag is
+  // converted by Mermaid into separate SVG tspans, without enabling foreignObject/HTML labels.
+  return source.replaceAll("\\n", "<br/>");
+}
+
 export function MermaidDiagram({ source }: { readonly source: string }) {
   const reactId = useId();
   const [state, setState] = useState<
@@ -21,7 +27,7 @@ export function MermaidDiagram({ source }: { readonly source: string }) {
           theme: "neutral",
         });
         const id = `kbiss-diagram-${reactId.replaceAll(":", "")}`;
-        const rendered = await mermaid.render(id, source);
+        const rendered = await mermaid.render(id, normalizeMermaidSource(source));
         const svg = sanitizeDiagramSvg(rendered.svg);
         if (active) setState(svg ? { phase: "ready", svg } : { phase: "error" });
       })
@@ -44,11 +50,11 @@ export function MermaidDiagram({ source }: { readonly source: string }) {
       </div>
     );
   }
+  const imageSource = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(state.svg)}`;
   return (
     <figure className="mermaid-diagram" aria-label="Mermaid diagram">
-      {/* Mermaid is configured for strict SVG output, then the SVG is independently sanitized. */}
-      {/* biome-ignore lint/security/noDangerouslySetInnerHtml: sanitizeDiagramSvg removes active elements, handlers, foreign content, and external links before insertion. */}
-      <div dangerouslySetInnerHTML={{ __html: state.svg }} />
+      {/* Rendering as an image isolates Mermaid's sanitized SVG stylesheet from the page CSP. */}
+      <img src={imageSource} alt="Rendered Mermaid diagram" />
       <figcaption>Mermaid diagram rendered locally</figcaption>
     </figure>
   );
