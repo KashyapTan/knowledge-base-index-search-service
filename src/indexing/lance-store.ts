@@ -380,12 +380,30 @@ export class LanceIndexStore implements IndexStore {
   }
 
   async getChunks(fileId: string): Promise<Result<readonly IndexedChunkRecord[], IndexStoreError>> {
+    const chunks = await this.getChunksForFiles([fileId]);
+    return chunks.ok ? ok(chunks.value) : chunks;
+  }
+
+  async getChunksForFiles(
+    fileIds: readonly string[],
+  ): Promise<Result<readonly IndexedChunkRecord[], IndexStoreError>> {
+    if (fileIds.length === 0) return ok([]);
     try {
-      const rows = (await this.#chunks
-        .query()
-        .where(`file_id = ${sqlString(fileId)}`)
-        .toArray()) as Record<string, unknown>[];
-      return ok(rows.map(toChunk).sort((left, right) => left.ordinal - right.ordinal));
+      const records: IndexedChunkRecord[] = [];
+      const unique = [...new Set(fileIds)];
+      for (let offset = 0; offset < unique.length; offset += 500) {
+        const batch = unique.slice(offset, offset + 500);
+        const rows = (await this.#chunks
+          .query()
+          .where(`file_id IN (${batch.map(sqlString).join(", ")})`)
+          .toArray()) as Record<string, unknown>[];
+        records.push(...rows.map(toChunk));
+      }
+      return ok(
+        records.sort(
+          (left, right) => left.fileId.localeCompare(right.fileId) || left.ordinal - right.ordinal,
+        ),
+      );
     } catch {
       return storeFailure("INDEX_READ_FAILED", "The indexed chunk records could not be read.");
     }
@@ -395,30 +413,56 @@ export class LanceIndexStore implements IndexStore {
     file: IndexedFileRecord,
     chunks: readonly IndexedChunkRecord[],
   ): Promise<Result<void, IndexStoreError>> {
-    if (chunks.some((chunk) => chunk.vector.length !== this.#config.embedding.vectorDimension)) {
+    return this.replaceFiles([{ file, chunks }]);
+  }
+
+  async replaceFiles(
+    entries: readonly {
+      readonly file: IndexedFileRecord;
+      readonly chunks: readonly IndexedChunkRecord[];
+    }[],
+  ): Promise<Result<void, IndexStoreError>> {
+    if (entries.length === 0) return ok(undefined);
+    const fileIds = entries.map((entry) => entry.file.fileId);
+    const fileIdSet = new Set(fileIds);
+    const chunks = entries.flatMap((entry) => entry.chunks);
+    const chunkIds = new Set(chunks.map((chunk) => chunk.chunkId));
+    if (
+      fileIdSet.size !== entries.length ||
+      chunkIds.size !== chunks.length ||
+      entries.some((entry) =>
+        entry.chunks.some(
+          (chunk) =>
+            chunk.fileId !== entry.file.fileId ||
+            chunk.vector.length !== this.#config.embedding.vectorDimension,
+        ),
+      )
+    ) {
       return storeFailure(
         "INDEX_SCHEMA_INVALID",
-        `Every vector must contain ${this.#config.embedding.vectorDimension} values.`,
+        `Every replacement must have a unique file ID and ${this.#config.embedding.vectorDimension}-value vectors owned by that file.`,
       );
     }
     try {
       if (chunks.length === 0) {
-        await this.#chunks.delete(`file_id = ${sqlString(file.fileId)}`);
+        await this.#chunks.delete(`file_id IN (${fileIds.map(sqlString).join(", ")})`);
       } else {
         await this.#chunks
           .mergeInsert("chunk_id")
           .whenMatchedUpdateAll()
           .whenNotMatchedInsertAll()
-          .whenNotMatchedBySourceDelete({ where: `file_id = ${sqlString(file.fileId)}` })
+          .whenNotMatchedBySourceDelete({
+            where: `file_id IN (${fileIds.map(sqlString).join(", ")})`,
+          })
           .execute(chunks.map(chunkToRow));
       }
-      // This commit marker advances only after the complete searchable chunk set is usable.
+      // These commit markers advance only after every complete searchable chunk set is usable.
       await this.#beforeFileCommit?.();
       await this.#files
         .mergeInsert("file_id")
         .whenMatchedUpdateAll()
         .whenNotMatchedInsertAll()
-        .execute([fileToRow(file)]);
+        .execute(entries.map((entry) => fileToRow(entry.file)));
       return ok(undefined);
     } catch {
       return storeFailure(

@@ -101,6 +101,7 @@ export interface ApplicationServices {
   readonly indexing: IndexingService;
   readonly store: IndexStore;
   readonly search: SearchService;
+  readonly closeExtraction: () => Promise<void>;
   readonly closeSearch: () => void;
 }
 

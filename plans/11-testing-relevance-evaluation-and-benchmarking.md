@@ -191,3 +191,7 @@ The release gate should require:
 - The full release gate passes 353 automated tests plus the dedicated cached real-ONNX smoke, the
   production build, Playwright browser flow, operations smoke, controlled relevance, external
   benchmark/model evidence checks, and the native compatibility check on macOS arm64.
+- Post-baseline performance revision (2026-08-21): bounded extraction/model Worker pools and batched
+  LanceDB commits raised measured real BGE-small throughput from the 31.76 chunks/s release baseline
+  to 59.78 chunks/s on the same Xpdite revision. The expanded core gate now passes 363 tests plus the
+  opt-in real-model smoke; detailed stage timings and comparison caveats are in the Plan 11 report.

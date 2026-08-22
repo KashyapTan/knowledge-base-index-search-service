@@ -152,7 +152,17 @@ export class FixtureIndexing implements IndexingService {
     for (const listener of this.#listeners) listener(progress);
     return this.fail
       ? err({ code: "INDEXING_FATAL" as const, message: "Fixture indexing failed." })
-      : ok({ progress });
+      : ok({
+          progress,
+          timing: {
+            totalMs: 0,
+            warmUpMs: 0,
+            preparationMs: 0,
+            embeddingMs: 0,
+            commitMs: 0,
+            finalizationMs: 0,
+          },
+        });
   }
 }
 
@@ -168,7 +178,18 @@ export class FixtureStore implements IndexStore {
   async getChunks() {
     return ok([] as IndexedChunkRecord[]);
   }
+  async getChunksForFiles() {
+    return ok([] as IndexedChunkRecord[]);
+  }
   async replaceFile(_file: IndexedFileRecord, _chunks: readonly IndexedChunkRecord[]) {
+    return ok(undefined);
+  }
+  async replaceFiles(
+    _entries: readonly {
+      readonly file: IndexedFileRecord;
+      readonly chunks: readonly IndexedChunkRecord[];
+    }[],
+  ) {
     return ok(undefined);
   }
   async markFileFailed() {
@@ -257,6 +278,7 @@ export function fixtureServices(
     indexing,
     store,
     search,
+    closeExtraction: async () => undefined,
     closeSearch: () => {
       searchCloseCount.value += 1;
     },

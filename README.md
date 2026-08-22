@@ -33,7 +33,13 @@ the source root, starts one `127.0.0.1` server, opens the browser once, prepares
 pinned model, resumes or creates the compatible index, reconciles the repository, and watches for
 changes until interrupted. The page is available during model loading and indexing and becomes
 searchable as committed data is ready. Stop with Ctrl-C; KBISS checkpoints safe work and shuts down
-the watcher, worker, LanceDB, and HTTP server.
+the watcher, worker pools, LanceDB, and HTTP server.
+
+Initial indexing is a bounded local pipeline. Larger machines use four file extraction/tokenization
+workers and two warm ONNX embedding workers. Changed files are prepared in 64-file windows, missing
+chunks are batched across file boundaries, and one serialized writer applies each complete window to
+LanceDB before advancing its file commit markers. This keeps the UI responsive, avoids concurrent
+database races, bounds memory, and preserves interruption-safe resume semantics.
 
 The first online run may take several minutes while it downloads and verifies
 `Xenova/bge-small-en-v1.5` q8. Download failure is retried twice. Later launches verify the cache and

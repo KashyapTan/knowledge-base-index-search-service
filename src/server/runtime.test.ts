@@ -109,6 +109,7 @@ describe("application lifecycle", () => {
     });
     if (created.ok) {
       created.value.closeSearch();
+      await created.value.closeExtraction();
       created.value.store.close();
       await created.value.embeddings.shutdown();
     }
@@ -132,6 +133,7 @@ describe("application lifecycle", () => {
     });
     if (offlineCreated.ok) {
       offlineCreated.value.closeSearch();
+      await offlineCreated.value.closeExtraction();
       offlineCreated.value.store.close();
       await offlineCreated.value.embeddings.shutdown();
     }

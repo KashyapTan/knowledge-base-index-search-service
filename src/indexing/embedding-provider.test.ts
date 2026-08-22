@@ -195,7 +195,60 @@ class RecordingWorker implements EmbeddingWorkerBoundary {
   }
 }
 
+class ConcurrentWorker implements EmbeddingWorkerBoundary {
+  readonly #cache: string;
+  readonly #state: { active: number; maxActive: number };
+  initializeCalls = 0;
+  closeCalls = 0;
+
+  constructor(cache: string, state: { active: number; maxActive: number }) {
+    this.#cache = cache;
+    this.#state = state;
+  }
+
+  async initialize(): Promise<void> {
+    this.initializeCalls += 1;
+    await mkdir(this.#cache, { recursive: true });
+    await writeFile(join(this.#cache, "weights.bin"), "local weights");
+  }
+
+  async embed(texts: readonly string[]): Promise<readonly (readonly number[])[]> {
+    this.#state.active += 1;
+    this.#state.maxActive = Math.max(this.#state.maxActive, this.#state.active);
+    await Bun.sleep(20);
+    this.#state.active -= 1;
+    return texts.map(() => [1, 0]);
+  }
+
+  async close(): Promise<void> {
+    this.closeCalls += 1;
+  }
+}
+
 describe("Transformers provider orchestration", () => {
+  test("runs document batches across a bounded pool of warm workers", async () => {
+    const cache = join(fixture, "pooled-models");
+    const state = { active: 0, maxActive: 0 };
+    const workers: ConcurrentWorker[] = [];
+    const provider = new TransformersEmbeddingProvider(embedding, cache, {
+      batchSize: 1,
+      workerCount: 2,
+      workerFactory: () => {
+        const worker = new ConcurrentWorker(cache, state);
+        workers.push(worker);
+        return worker;
+      },
+    });
+    expect(await provider.warmUp()).toEqual({ ok: true, value: undefined });
+    expect(await provider.warmUp()).toEqual({ ok: true, value: undefined });
+    const result = await provider.embedDocuments(["one", "two", "three", "four"]);
+    expect(result.ok && result.value).toHaveLength(4);
+    expect(state.maxActive).toBe(2);
+    expect(workers.map((worker) => worker.initializeCalls)).toEqual([1, 1]);
+    await provider.shutdown();
+    expect(workers.map((worker) => worker.closeCalls)).toEqual([1, 1]);
+  });
+
   test("preserves a corrupt cache and retries pinned acquisition with progress", async () => {
     const cache = join(fixture, "recover-models");
     await mkdir(cache, { recursive: true });

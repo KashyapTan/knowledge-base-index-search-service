@@ -128,9 +128,18 @@ export interface IndexStore {
     fileIds: readonly string[],
   ): Promise<Result<readonly IndexedFileRecord[], IndexStoreError>>;
   getChunks(fileId: string): Promise<Result<readonly IndexedChunkRecord[], IndexStoreError>>;
+  getChunksForFiles(
+    fileIds: readonly string[],
+  ): Promise<Result<readonly IndexedChunkRecord[], IndexStoreError>>;
   replaceFile(
     file: IndexedFileRecord,
     chunks: readonly IndexedChunkRecord[],
+  ): Promise<Result<void, IndexStoreError>>;
+  replaceFiles(
+    entries: readonly {
+      readonly file: IndexedFileRecord;
+      readonly chunks: readonly IndexedChunkRecord[];
+    }[],
   ): Promise<Result<void, IndexStoreError>>;
   markFileFailed(
     file: DiscoveredFile,
@@ -179,6 +188,16 @@ export interface IndexingProgress {
 
 export interface IndexingRunResult {
   readonly progress: IndexingProgress;
+  readonly timing: IndexingTiming;
+}
+
+export interface IndexingTiming {
+  readonly totalMs: number;
+  readonly warmUpMs: number;
+  readonly preparationMs: number;
+  readonly embeddingMs: number;
+  readonly commitMs: number;
+  readonly finalizationMs: number;
 }
 
 export type IndexingErrorCode = "INDEXING_CANCELLED" | "INDEXING_FATAL";

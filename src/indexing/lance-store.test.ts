@@ -154,6 +154,53 @@ describe("LanceDB index storage", () => {
     opened.value.close();
   });
 
+  test("reads and replaces multiple files in one bounded table commit", async () => {
+    const config = indexingConfig(
+      join(fixture, "root"),
+      join(fixture, "state"),
+      join(fixture, "cache"),
+    );
+    const opened = await openLanceIndex(config);
+    if (!opened.ok) throw new Error(opened.error.message);
+    const secondFile: IndexedFileRecord = {
+      ...fileRecord("hash-two"),
+      fileId: "file-2",
+      relativePath: "docs/two.md",
+      filename: "two.md",
+    };
+    const secondChunk: IndexedChunkRecord = {
+      ...chunkRecord("chunk-2", "second text", [0, 1, 0, 0]),
+      fileId: "file-2",
+      relativePath: "docs/two.md",
+      filename: "two.md",
+      fileContentHash: "hash-two",
+    };
+    expect(
+      await opened.value.replaceFiles([
+        { file: fileRecord(), chunks: [chunkRecord()] },
+        { file: secondFile, chunks: [secondChunk] },
+      ]),
+    ).toEqual({ ok: true, value: undefined });
+    const chunks = await opened.value.getChunksForFiles(["file-2", "file-1"]);
+    expect(chunks.ok && chunks.value.map((chunk) => chunk.chunkId)).toEqual(["chunk-1", "chunk-2"]);
+    expect(
+      await opened.value.replaceFiles([
+        { file: fileRecord("hash-three"), chunks: [chunkRecord("chunk-3")] },
+        { file: { ...secondFile, chunkCount: 0 }, chunks: [] },
+      ]),
+    ).toEqual({ ok: true, value: undefined });
+    expect(await opened.value.getChunks("file-2")).toEqual({ ok: true, value: [] });
+    expect(
+      (
+        await opened.value.replaceFiles([
+          { file: fileRecord(), chunks: [] },
+          { file: fileRecord(), chunks: [] },
+        ])
+      ).ok,
+    ).toBe(false);
+    opened.value.close();
+  });
+
   test("removes failed and deleted files without leaving stale chunks", async () => {
     const config = indexingConfig(
       join(fixture, "root"),

@@ -68,7 +68,9 @@ describe("resumable indexing orchestration", () => {
       getFile: delegate.getFile.bind(delegate),
       getFiles: delegate.getFiles.bind(delegate),
       getChunks: delegate.getChunks.bind(delegate),
+      getChunksForFiles: delegate.getChunksForFiles.bind(delegate),
       replaceFile: delegate.replaceFile.bind(delegate),
+      replaceFiles: delegate.replaceFiles.bind(delegate),
       markFileFailed: delegate.markFileFailed.bind(delegate),
       deleteFile: delegate.deleteFile.bind(delegate),
       async refreshSearchIndexes() {
@@ -319,5 +321,74 @@ describe("resumable indexing orchestration", () => {
       "resume-b",
     ]);
     resumed.value.close();
+  });
+
+  test("prepares files concurrently, embeds across file boundaries, and uses one batched writer", async () => {
+    const config = indexingConfig(
+      join(fixture, "root"),
+      join(fixture, "state"),
+      join(fixture, "cache"),
+    );
+    const files = [
+      indexableFile("a.md", "a"),
+      indexableFile("b.md", "b"),
+      indexableFile("c.md", "c"),
+    ];
+    let active = 0;
+    let maxActive = 0;
+    const extraction = {
+      async process(file: (typeof files)[number]) {
+        active += 1;
+        maxActive = Math.max(maxActive, active);
+        await Bun.sleep(10);
+        active -= 1;
+        return {
+          ok: true as const,
+          value: extracted(file, [searchChunk(file, `${file.filename}-chunk`, file.filename, 0)]),
+        };
+      },
+    };
+    const embeddings = new FakeEmbeddingProvider({ dimension: 4, batchSize: 2 });
+    const opened = await openLanceIndex(config);
+    if (!opened.ok) throw new Error(opened.error.message);
+    let chunkReadCalls = 0;
+    let batchWriteCalls = 0;
+    const delegate = opened.value;
+    const store: IndexStore = {
+      getFile: delegate.getFile.bind(delegate),
+      getFiles: delegate.getFiles.bind(delegate),
+      getChunks: delegate.getChunks.bind(delegate),
+      async getChunksForFiles(fileIds) {
+        chunkReadCalls += 1;
+        return delegate.getChunksForFiles(fileIds);
+      },
+      replaceFile: delegate.replaceFile.bind(delegate),
+      async replaceFiles(entries) {
+        batchWriteCalls += 1;
+        return delegate.replaceFiles(entries);
+      },
+      markFileFailed: delegate.markFileFailed.bind(delegate),
+      deleteFile: delegate.deleteFile.bind(delegate),
+      refreshSearchIndexes: delegate.refreshSearchIndexes.bind(delegate),
+      close: delegate.close.bind(delegate),
+    };
+    const service = createIndexingService(config, { extraction, embeddings, store });
+    const result = await service.indexFiles(files);
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value.progress).toMatchObject({
+        committedChunks: 3,
+        embeddedChunks: 3,
+        batchesCompleted: 2,
+        failedFiles: 0,
+      });
+      expect(result.value.timing.totalMs).toBeGreaterThanOrEqual(0);
+      expect(result.value.timing.preparationMs).toBeGreaterThanOrEqual(10);
+    }
+    expect(maxActive).toBe(3);
+    expect(chunkReadCalls).toBe(1);
+    expect(batchWriteCalls).toBe(1);
+    expect(embeddings.embeddedTexts).toHaveLength(3);
+    opened.value.close();
   });
 });

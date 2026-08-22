@@ -143,4 +143,5 @@ export interface ExtractedFile {
 
 export interface ExtractionPipeline {
   process(file: DiscoveredFile): Promise<Result<ExtractedFile, ExtractionError>>;
+  shutdown?(): Promise<void>;
 }

@@ -23,7 +23,12 @@ import {
   type FileManifest,
 } from "../discovery/index.ts";
 import { evaluateJudgments, loadJudgmentSet } from "../evaluation/index.ts";
-import { createExtractionPipeline, createTransformersTokenCounter } from "../extraction/index.ts";
+import {
+  createExtractionPipeline,
+  createTransformersTokenCounter,
+  createWorkerExtractionPipeline,
+  type ExtractionPipeline,
+} from "../extraction/index.ts";
 import {
   CHUNKS_TABLE,
   createIndexingService,
@@ -383,6 +388,7 @@ export async function runLargeRepositoryBenchmark(
   const memory = new MemorySampler();
   let store: LanceIndexStore | undefined;
   let retriever: LanceCandidateRetriever | undefined;
+  let extraction: ExtractionPipeline | undefined;
   try {
     const modelLoad = await measure(async () =>
       expectOk(
@@ -409,11 +415,7 @@ export async function runLargeRepositoryBenchmark(
     store = expectOk(
       await openLanceIndex(config, { annThreshold: options.definition.annThreshold }),
     );
-    const extraction = createExtractionPipeline(
-      config,
-      tokenizerLoad.value,
-      embeddings.identity.maximumTokens,
-    );
+    extraction = createWorkerExtractionPipeline(config, embeddings.identity.maximumTokens);
     const indexing = createIndexingService(config, { extraction, embeddings, store });
     const initialIndex = await measure(async () =>
       expectOk(await indexing.indexFiles(initialScan.value.files)),
@@ -544,6 +546,7 @@ export async function runLargeRepositoryBenchmark(
         tokenDistribution: summarizeDistribution(tokens),
         noChangeReconciliationMs: noChange.elapsedMs,
         noChangeFiles: noChange.value.progress.unchangedFiles,
+        stageTiming: initialIndex.value.timing,
       },
       memory: {
         peakRssBytes,
@@ -566,6 +569,7 @@ export async function runLargeRepositoryBenchmark(
     memory.stop();
     retriever?.close();
     store?.close();
+    await extraction?.shutdown?.();
     await embeddings.shutdown();
   }
 }

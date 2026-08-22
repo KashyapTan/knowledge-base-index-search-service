@@ -1,3 +1,4 @@
+import { availableParallelism } from "node:os";
 import type { AppConfig, EmbeddingConfig } from "../config/index.ts";
 import { err, ok, type Result } from "../shared/result.ts";
 import type {
@@ -60,11 +61,12 @@ export class TransformersEmbeddingProvider implements EmbeddingProvider {
   readonly identity: EmbeddingIdentity;
   readonly batchSize: number;
   readonly #cacheDir: string;
-  readonly #worker: EmbeddingWorkerBoundary;
+  readonly #workers: readonly EmbeddingWorkerBoundary[];
+  readonly #availableWorkers: EmbeddingWorkerBoundary[];
+  readonly #activeWorkers = new Set<EmbeddingWorkerBoundary>();
   readonly #maxQueue: number;
   readonly #queue: QueueJob[] = [];
   readonly #idleWaiters: Array<() => void> = [];
-  #active = false;
   #closed = false;
   #ready = false;
   #shutdownPromise: Promise<void> | undefined;
@@ -77,6 +79,8 @@ export class TransformersEmbeddingProvider implements EmbeddingProvider {
       readonly maximumTokens?: number;
       readonly maxQueue?: number;
       readonly worker?: EmbeddingWorkerBoundary;
+      readonly workerCount?: number;
+      readonly workerFactory?: () => EmbeddingWorkerBoundary;
     } = {},
   ) {
     const profile = BGE_MODEL_PROFILES[embedding.modelId as keyof typeof BGE_MODEL_PROFILES];
@@ -90,7 +94,14 @@ export class TransformersEmbeddingProvider implements EmbeddingProvider {
     this.batchSize = options.batchSize ?? 16;
     this.#maxQueue = options.maxQueue ?? 8;
     this.#cacheDir = cacheDir;
-    this.#worker = options.worker ?? new EmbeddingWorkerClient();
+    const workerCount = Math.max(1, Math.min(4, options.workerCount ?? 1));
+    this.#workers = options.worker
+      ? [options.worker]
+      : Array.from(
+          { length: workerCount },
+          () => options.workerFactory?.() ?? new EmbeddingWorkerClient(),
+        );
+    this.#availableWorkers = [...this.#workers];
   }
 
   encodeDocument(text: string): string {
@@ -107,6 +118,7 @@ export class TransformersEmbeddingProvider implements EmbeddingProvider {
       return err(
         embeddingFailure("EMBEDDING_PROVIDER_CLOSED", "The embedding provider is closed."),
       );
+    if (this.#ready) return ok(undefined);
     const progress = options.onProgress ?? (() => undefined);
     progress("verifying", "Verifying local model assets.");
     const inspection = await inspectModelAssets(this.#cacheDir, this.identity);
@@ -120,7 +132,7 @@ export class TransformersEmbeddingProvider implements EmbeddingProvider {
     }
     try {
       progress("loading-local", "Loading the model from the local cache.");
-      await this.#worker.initialize({
+      await this.#workers[0]?.initialize({
         modelId: this.identity.modelId,
         dtype: this.identity.quantization,
         expectedDimension: this.identity.vectorDimension,
@@ -147,7 +159,7 @@ export class TransformersEmbeddingProvider implements EmbeddingProvider {
           `Downloading the pinned model (${attempt}/${attempts}); existing verified assets remain local.`,
         );
         try {
-          await this.#worker.initialize({
+          await this.#workers[0]?.initialize({
             modelId: this.identity.modelId,
             dtype: this.identity.quantization,
             expectedDimension: this.identity.vectorDimension,
@@ -161,6 +173,21 @@ export class TransformersEmbeddingProvider implements EmbeddingProvider {
         }
       }
       if (downloadError) return err(mapWorkerError(downloadError));
+    }
+    try {
+      await Promise.all(
+        this.#workers.slice(1).map((worker) =>
+          worker.initialize({
+            modelId: this.identity.modelId,
+            dtype: this.identity.quantization,
+            expectedDimension: this.identity.vectorDimension,
+            cacheDir: this.#cacheDir,
+            localFilesOnly: true,
+          }),
+        ),
+      );
+    } catch (error) {
+      return err(mapWorkerError(error));
     }
     const manifest = await verifyOrWriteModelAssetManifest(
       this.#cacheDir,
@@ -195,14 +222,33 @@ export class TransformersEmbeddingProvider implements EmbeddingProvider {
         texts.slice(offset, offset + this.batchSize).map((text) => this.encodeDocument(text)),
       );
     }
-    const vectors: (readonly number[])[] = [];
-    for (const [index, batch] of batches.entries()) {
-      const result = await this.#enqueue(batch, options.signal);
-      if (!result.ok) return result;
-      vectors.push(...result.value);
-      options.onBatch?.(index + 1, batches.length);
-    }
-    return ok(vectors);
+    const batchVectors: Array<readonly (readonly number[])[] | undefined> = new Array(
+      batches.length,
+    );
+    let nextBatch = 0;
+    let completed = 0;
+    let firstError: EmbeddingError | undefined;
+    const run = async () => {
+      while (!firstError) {
+        const index = nextBatch;
+        nextBatch += 1;
+        const batch = batches[index];
+        if (!batch) return;
+        const result = await this.#enqueue(batch, options.signal);
+        if (!result.ok) {
+          firstError ??= result.error;
+          return;
+        }
+        batchVectors[index] = result.value;
+        completed += 1;
+        options.onBatch?.(completed, batches.length);
+      }
+    };
+    await Promise.all(
+      Array.from({ length: Math.min(this.#workers.length, batches.length) }, () => run()),
+    );
+    if (firstError) return err(firstError);
+    return ok(batchVectors.flatMap((vectors) => vectors ?? []));
   }
 
   async embedQuery(
@@ -226,7 +272,7 @@ export class TransformersEmbeddingProvider implements EmbeddingProvider {
     texts: readonly string[],
     signal?: AbortSignal,
   ): Promise<Result<readonly (readonly number[])[], EmbeddingError>> {
-    if (this.#queue.length + Number(this.#active) >= this.#maxQueue) {
+    if (this.#queue.length + this.#activeWorkers.size >= this.#maxQueue) {
       return Promise.resolve(
         err(embeddingFailure("EMBEDDING_QUEUE_FULL", "The bounded embedding queue is full.")),
       );
@@ -238,15 +284,19 @@ export class TransformersEmbeddingProvider implements EmbeddingProvider {
   }
 
   async #pump(): Promise<void> {
-    if (this.#active) return;
+    const worker = this.#availableWorkers.shift();
+    if (!worker) return;
     const job = this.#queue.shift();
-    if (!job) return;
-    this.#active = true;
+    if (!job) {
+      this.#availableWorkers.unshift(worker);
+      return;
+    }
+    this.#activeWorkers.add(worker);
     if (job.signal?.aborted) {
       job.resolve(err(embeddingFailure("EMBEDDING_CANCELLED", "Embedding was cancelled.")));
     } else {
       try {
-        const vectors = await this.#worker.embed(job.texts);
+        const vectors = await worker.embed(job.texts);
         if (job.signal?.aborted) {
           job.resolve(err(embeddingFailure("EMBEDDING_CANCELLED", "Embedding was cancelled.")));
         } else {
@@ -257,8 +307,9 @@ export class TransformersEmbeddingProvider implements EmbeddingProvider {
         job.resolve(err(mapWorkerError(error)));
       }
     }
-    this.#active = false;
-    if (this.#closed) {
+    this.#activeWorkers.delete(worker);
+    this.#availableWorkers.push(worker);
+    if (this.#closed && this.#activeWorkers.size === 0) {
       for (const resolve of this.#idleWaiters.splice(0)) resolve();
     } else {
       void this.#pump();
@@ -272,8 +323,9 @@ export class TransformersEmbeddingProvider implements EmbeddingProvider {
         err(embeddingFailure("EMBEDDING_PROVIDER_CLOSED", "The embedding provider is closed.")),
       );
     }
-    if (this.#active) await new Promise<void>((resolve) => this.#idleWaiters.push(resolve));
-    await this.#worker.close();
+    if (this.#activeWorkers.size > 0)
+      await new Promise<void>((resolve) => this.#idleWaiters.push(resolve));
+    await Promise.all(this.#workers.map((worker) => worker.close()));
   }
 
   #validate(
@@ -311,5 +363,9 @@ export function createTransformersEmbeddingProvider(
   config: AppConfig,
   options?: ConstructorParameters<typeof TransformersEmbeddingProvider>[2],
 ): TransformersEmbeddingProvider {
-  return new TransformersEmbeddingProvider(config.embedding, config.paths.modelCacheDir, options);
+  const workerCount = availableParallelism() >= 8 ? 2 : 1;
+  return new TransformersEmbeddingProvider(config.embedding, config.paths.modelCacheDir, {
+    workerCount,
+    ...options,
+  });
 }

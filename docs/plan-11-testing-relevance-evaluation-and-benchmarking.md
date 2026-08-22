@@ -90,6 +90,35 @@ identical relevance metrics, zero failures, and unchanged source status. Warm qu
 stable. External-copy incremental propagation with BGE small measured 81.5 ms update, 58.0 ms delete,
 and 63.9 ms rename. Viewer open/grep measured below 6 ms / 2 ms even for the 731 KiB large-file case.
 
+### Post-baseline parallel indexing revision (2026-08-21)
+
+The indexer now uses bounded 64-file preparation windows, bulk prior-chunk reads, corpus-wide model
+batches, two warm ONNX workers on larger machines, a four-worker extraction/tokenization pool, and
+one serialized LanceDB writer that commits each window with chunks first and file markers second.
+This preserves the established interruption/reuse protocol while eliminating concurrent table
+writes and hundreds of per-file fragments.
+
+Read-only measurements on the same Xpdite revision, using external temporary state and the existing
+verified q8 cache, produced the following evidence:
+
+| Measurement | Before | After |
+| --- | ---: | ---: |
+| Real BGE-small throughput | 31.76 chunks/s release baseline | 59.78 chunks/s |
+| 512-chunk inference sample | 42.69 chunks/s, one worker | 68.42 chunks/s, two workers |
+| 10,269-chunk fake-inference full pass | 82.0 s | 27.8 s after batched DB; 23.2 s with extraction workers |
+| No-change reconciliation | 241.7 ms release baseline | 37.4 ms on the current default-ignore corpus |
+
+The combined production path indexed 10,269 real-model chunks across 882 ready files in 171.8
+seconds with zero failures. Stage timing was 23.37 seconds preparation, 147.73 seconds embedding,
+0.58 seconds commit, and 0.11 seconds finalization. The corpus selection differs from the narrower
+586-file release benchmark, so wall times are not treated as a direct regression series; normalized
+real-model throughput improved by about 88%. Xpdite Git status remained unchanged.
+
+Batch-size trials retained 16: batch 32 improved the 512-chunk sample only about 1.5%, while batch
+64 regressed and required more memory. Embedding inference remains the dominant cost, so a Rust file
+parser rewrite is not supported by this evidence; future backend work should target measured model
+inference throughput.
+
 ## Security and release status
 
 Path traversal/forged IDs, symlink swaps, Host/Origin/CSRF checks, Markdown/HTML/SVG sanitization,

@@ -107,3 +107,7 @@ Plan 06 builds retrieval and ranking over the persisted file/chunk schema and qu
   aggregate line/function coverage; Plan 5's non-trivial provider, storage, recovery, and orchestration
   modules meet or exceed the 93% target. Full contracts and Plan 6 handoff details are recorded in
   `docs/plan-05-local-embeddings-and-indexing.md`.
+- Post-plan performance revision (2026-08-21): production now uses bounded extraction and embedding
+  Worker pools, 64-file corpus-wide embedding windows, bulk prior-chunk reads, and one serialized
+  batched LanceDB writer. The chunks-first/file-marker recovery invariant remains unchanged. Stage
+  timings and measured throughput evidence are recorded in the Plan 5 and Plan 11 documentation.

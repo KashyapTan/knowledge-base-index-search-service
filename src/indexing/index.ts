@@ -16,6 +16,7 @@ export type {
   IndexingProgress,
   IndexingRunResult,
   IndexingService,
+  IndexingTiming,
   IndexStore,
   IndexStoreError,
   IndexStoreErrorCode,

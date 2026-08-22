@@ -35,6 +35,11 @@ No absolute source path or corpus content is included.
 - Model load: ${milliseconds(report.startup.modelLoadMs)}; tokenizer: ${milliseconds(report.startup.tokenizerLoadMs)}
 - Initial scan: ${milliseconds(report.startup.initialScanMs)}
 - Initial indexing: ${milliseconds(report.indexing.initialWallMs)} (${report.indexing.chunksPerSecond.toFixed(2)} chunks/s)
+${
+  report.indexing.stageTiming
+    ? `- Indexing stages: preparation ${milliseconds(report.indexing.stageTiming.preparationMs)}, embedding ${milliseconds(report.indexing.stageTiming.embeddingMs)}, commit ${milliseconds(report.indexing.stageTiming.commitMs)}, finalization ${milliseconds(report.indexing.stageTiming.finalizationMs)}`
+    : ""
+}
 - No-change reconciliation: ${milliseconds(report.indexing.noChangeReconciliationMs)}
 - Peak / steady RSS: ${bytes(report.memory.peakRssBytes)} / ${bytes(report.memory.steadyRssBytes)}
 - Index / model cache: ${bytes(report.storage.indexBytes)} / ${bytes(report.storage.modelCacheBytes)}

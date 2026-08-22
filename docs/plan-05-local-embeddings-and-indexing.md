@@ -42,13 +42,19 @@ the selected model/quantization plus size, modification time, and SHA-256 for ev
 asset. Subsequent startups reject malformed, mismatched, missing, symlinked, resized, or changed
 assets. Hashing uses cheap metadata first and rehashes a file when its metadata changes.
 
-One Bun Worker owns the Transformers.js pipeline and ONNX runtime. The provider splits requests into
-16-document batches by default, serializes them through a bounded queue of eight jobs, and keeps the
-model warm. A full queue returns `EMBEDDING_QUEUE_FULL`. Aborted queued work never reaches inference;
-an active ONNX call is allowed to finish but its result is discarded. Shutdown rejects queued work,
-waits for the active call, sends the typed Worker shutdown handshake, disposes the pipeline, and then
-terminates the Worker. This keeps CPU-heavy inference outside the Bun HTTP event loop without one
-model instance per file.
+A bounded Bun Worker pool owns the Transformers.js pipelines and ONNX runtimes. Machines with at
+least eight logical CPUs use two warm inference workers; smaller machines retain one. The provider
+splits requests into 16-document batches, schedules at most one active batch per worker, preserves
+result order, and keeps a bounded queue of eight jobs. A full queue returns
+`EMBEDDING_QUEUE_FULL`. Aborted queued work never reaches inference; an active ONNX call is allowed
+to finish but its result is discarded. Shutdown rejects queued work, waits for active calls, sends
+typed Worker shutdown handshakes, disposes both pipelines, and terminates the Workers.
+
+Production extraction uses a separate bounded pool: four tokenizer/extraction workers on machines
+with at least eight logical CPUs, two on machines with four to seven, and one below that. Every
+worker independently revalidates paths and loads the verified tokenizer from the local-only cache.
+The pool is owned by the application lifecycle and drained before shutdown, keeping repeated exact
+token counting and parsing off the Bun HTTP event loop.
 
 ## LanceDB tables
 
@@ -86,10 +92,16 @@ Metadata-only changes update the file metadata without embedding. Content change
 chunked, then prior vectors are reused only when chunk ID, chunk content hash, dimensions, extractor
 version, and chunker version match. Remaining `searchText` values are embedded in provider batches.
 
-The complete new chunk set is applied with one LanceDB `mergeInsert`: matching rows update, new rows
-insert, and prior rows for that file that are absent from the source are deleted in the same table
-commit. Only after that atomic chunk replacement succeeds does the indexer advance the `files` row,
-which is the file-level commit marker. Therefore:
+The indexer operates in bounded 64-file windows. It fetches prior chunks for all changed files in
+500-ID reads, prepares the window concurrently, flattens missing chunks into corpus-wide embedding
+batches, and sends one completed window to the database writer. This prevents small files from
+underfilling model batches and bounds prepared text/vector memory.
+
+Complete chunk sets for a bounded window are applied with one LanceDB `mergeInsert`: matching rows
+update, new rows insert, and prior rows for every file in the window that are absent from the source
+are deleted in the same table commit. One serialized writer performs this operation, so embedding
+workers never mutate LanceDB. Only after the chunk-table commit succeeds does the writer advance all
+corresponding `files` rows, which remain the file-level commit markers. Therefore:
 
 - interruption before the chunk commit leaves the prior complete file version;
 - interruption after the chunk commit leaves a complete new chunk version and an old/missing file
@@ -114,6 +126,10 @@ when using ANN so recent commits stay searchable.
 files, total/embedded/reused/committed chunks, completed batches, a conservative ETA after measured
 progress as an epoch-millisecond completion estimate, and file-scoped error summaries. Events never
 contain file contents or queries.
+
+Every completed run also returns `IndexingTiming`: total, warm-up, preparation, embedding, commit,
+and finalization milliseconds. Large-repository reports persist this breakdown so future tuning is
+based on measured stages rather than aggregate wall time.
 
 ## Plan 6 handoff
 

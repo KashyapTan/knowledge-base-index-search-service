@@ -1,5 +1,5 @@
 import type { RelevanceEvaluationReport } from "../evaluation/index.ts";
-import type { IndexingFileError } from "../indexing/index.ts";
+import type { IndexingFileError, IndexingTiming } from "../indexing/index.ts";
 import type { SearchTiming } from "../search/index.ts";
 
 export interface DistributionSummary {
@@ -94,6 +94,7 @@ export interface LargeRepositoryBenchmarkReport {
     readonly tokenDistribution: DistributionSummary;
     readonly noChangeReconciliationMs: number;
     readonly noChangeFiles: number;
+    readonly stageTiming?: IndexingTiming;
   };
   readonly memory: {
     readonly peakRssBytes: number;

@@ -3,8 +3,8 @@ import { AutoTokenizer } from "@huggingface/transformers";
 import type { AppConfig, StartupIssue, StartupStateStore } from "../config/index.ts";
 import { createDiscoveryService, type FileChange } from "../discovery/index.ts";
 import {
-  createExtractionPipeline,
   createTransformersTokenCounter,
+  createWorkerExtractionPipeline,
   type ExtractionPipeline,
   type TokenCounter,
 } from "../extraction/index.ts";
@@ -81,7 +81,8 @@ const productionAdapters: ProductionServiceAdapters = {
   openStore: openLanceIndex,
   openRetriever: openLanceCandidateRetriever,
   createDiscovery: createDiscoveryService,
-  createExtraction: createExtractionPipeline,
+  createExtraction: (config, _tokenizer, maxTokens) =>
+    createWorkerExtractionPipeline(config, maxTokens),
   createIndexing: createIndexingService,
   createSearch: createSearchService,
 };
@@ -95,6 +96,7 @@ export async function createProductionServices(
   const embeddings = adapters.createEmbeddings(config);
   let store: IndexStore | undefined;
   let retriever: CandidateRetriever | undefined;
+  let extraction: ExtractionPipeline | undefined;
   let completed = false;
   try {
     if (signal.aborted) {
@@ -125,11 +127,7 @@ export async function createProductionServices(
       store.close();
       return serviceFailure(discovery.error);
     }
-    const extraction = adapters.createExtraction(
-      config,
-      tokenizer,
-      embeddings.identity.maximumTokens,
-    );
+    extraction = adapters.createExtraction(config, tokenizer, embeddings.identity.maximumTokens);
     const indexing = adapters.createIndexing(config, { extraction, embeddings, store });
     const activeRetriever = retriever;
     completed = true;
@@ -139,6 +137,7 @@ export async function createProductionServices(
       indexing,
       store,
       search: adapters.createSearch({ embeddings, retriever: activeRetriever }),
+      closeExtraction: async () => extraction?.shutdown?.(),
       closeSearch: () => activeRetriever.close(),
     });
   } catch {
@@ -149,7 +148,10 @@ export async function createProductionServices(
       message: "The local index services could not be initialized.",
     });
   } finally {
-    if (!completed) await embeddings.shutdown();
+    if (!completed) {
+      await extraction?.shutdown?.();
+      await embeddings.shutdown();
+    }
   }
 }
 
@@ -445,6 +447,7 @@ export class ApplicationRuntime {
     services.discovery.watcher.stop();
     services.closeSearch();
     services.store.close();
+    await services.closeExtraction();
     await services.embeddings.shutdown();
   }
 }
