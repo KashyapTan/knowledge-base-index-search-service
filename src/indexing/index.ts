@@ -1,4 +1,5 @@
 export type {
+  EmbeddingBatchMetric,
   EmbeddingError,
   EmbeddingErrorCode,
   EmbeddingIdentity,
@@ -23,6 +24,7 @@ export type {
   IndexStoreErrorCode,
   ModelSetupPhase,
   ModelWarmUpOptions,
+  ReusableChunkRecord,
 } from "./contracts.ts";
 export {
   type EmbeddingVectorBatch,
@@ -34,6 +36,7 @@ export {
 export {
   ACCELERATOR_TOKEN_BUCKETS,
   acceleratorTokenBucket,
+  acceleratorTokenBuckets,
   createTransformersEmbeddingProvider,
   type EmbeddingWorkerBoundary,
   TransformersEmbeddingProvider,

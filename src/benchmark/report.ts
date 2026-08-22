@@ -37,7 +37,9 @@ No absolute source path or corpus content is included.
 - Initial indexing: ${milliseconds(report.indexing.initialWallMs)} (${report.indexing.chunksPerSecond.toFixed(2)} chunks/s)
 ${
   report.indexing.stageTiming
-    ? `- Indexing stages: preparation ${milliseconds(report.indexing.stageTiming.preparationMs)}, embedding ${milliseconds(report.indexing.stageTiming.embeddingMs)}, commit ${milliseconds(report.indexing.stageTiming.commitMs)}, finalization ${milliseconds(report.indexing.stageTiming.finalizationMs)}`
+    ? `- Indexing stage busy time (overlaps; do not sum as wall time): preparation ${milliseconds(report.indexing.stageTiming.preparationMs)}, embedding ${milliseconds(report.indexing.stageTiming.embeddingMs)}, commit ${milliseconds(report.indexing.stageTiming.commitMs)}, finalization ${milliseconds(report.indexing.stageTiming.finalizationMs)}
+- Pipeline wall time: ${milliseconds(report.indexing.stageTiming.pipelineWallMs ?? report.indexing.stageTiming.totalMs)}; queue wait/backpressure: preparation ${milliseconds(report.indexing.stageTiming.stageWaitMs?.preparation ?? 0)}, embedding ${milliseconds(report.indexing.stageTiming.stageWaitMs?.embedding ?? 0)}, commit ${milliseconds(report.indexing.stageTiming.stageWaitMs?.commit ?? 0)}
+- Embedding token utilization: ${(report.indexing.stageTiming.embeddingUtilization?.usefulTokens ?? 0).toLocaleString()} useful / ${(report.indexing.stageTiming.embeddingUtilization?.paddedTokens ?? 0).toLocaleString()} padded tokens in ${(report.indexing.stageTiming.embeddingUtilization?.batches ?? 0).toLocaleString()} batches`
     : ""
 }
 - No-change reconciliation: ${milliseconds(report.indexing.noChangeReconciliationMs)}
@@ -51,6 +53,16 @@ ${
 - Read-only verification: ${report.corpus.readOnlyVerification.gitStatusUnchanged === false ? "failed" : "passed"}
 - Initial indexing failures: ${report.indexing.failedFiles}; no-change files: ${report.indexing.noChangeFiles}
 - External-copy update/delete/rename: ${milliseconds(report.incrementalFixture.updateMs)} / ${milliseconds(report.incrementalFixture.deleteMs)} / ${milliseconds(report.incrementalFixture.renameMs)}
+${
+  report.incrementalFixture.metadataOnlyMass
+    ? `- Metadata-only mass update: ${report.incrementalFixture.metadataOnlyMass.fileCount} files in ${milliseconds(report.incrementalFixture.metadataOnlyMass.wallMs)}; embedded ${report.incrementalFixture.metadataOnlyMass.embeddedChunks} chunks; chunk table ${report.incrementalFixture.metadataOnlyMass.chunksVersionUnchanged ? "unchanged" : "changed"}`
+    : ""
+}
+${
+  report.incrementalFixture.largeFileEdits
+    ? `- Large-file start/middle/end edits (${bytes(report.incrementalFixture.largeFileEdits.fileBytes)}): ${milliseconds(report.incrementalFixture.largeFileEdits.start.wallMs)} / ${milliseconds(report.incrementalFixture.largeFileEdits.middle.wallMs)} / ${milliseconds(report.incrementalFixture.largeFileEdits.end.wallMs)}; embedded ${report.incrementalFixture.largeFileEdits.start.embeddedChunks}/${report.incrementalFixture.largeFileEdits.middle.embeddedChunks}/${report.incrementalFixture.largeFileEdits.end.embeddedChunks} chunks`
+    : ""
+}
 ${
   relevance
     ? `- Recall@5 ${(relevance.recallAt5 * 100).toFixed(1)}%; Recall@10 ${(relevance.recallAt10 * 100).toFixed(1)}%; MRR ${relevance.meanReciprocalRank.toFixed(3)}`

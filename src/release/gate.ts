@@ -76,6 +76,22 @@ export function validateLargeBenchmarkEvidence(
   ) {
     failures.push("viewer grep latency exceeds the severe-regression threshold");
   }
+  const metadataOnly = report.incrementalFixture.metadataOnlyMass;
+  if (
+    metadataOnly &&
+    (metadataOnly.embeddedChunks !== 0 || metadataOnly.chunksVersionUnchanged !== true)
+  ) {
+    failures.push("metadata-only mass update performed chunk or embedding work");
+  }
+  const largeEdits = report.incrementalFixture.largeFileEdits;
+  if (
+    largeEdits &&
+    [largeEdits.start, largeEdits.middle, largeEdits.end].some(
+      (edit) => edit.embeddedChunks === 0 || edit.reusedChunks === 0,
+    )
+  ) {
+    failures.push("large-file edit evidence does not demonstrate selective vector reuse");
+  }
   return failures;
 }
 

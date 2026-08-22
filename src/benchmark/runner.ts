@@ -9,6 +9,7 @@ import {
   rename,
   rm,
   unlink,
+  utimes,
   writeFile,
 } from "node:fs/promises";
 import { cpus, platform, release, totalmem } from "node:os";
@@ -272,6 +273,7 @@ async function runIncrementalFixture(
   embeddings: EmbeddingProvider,
   tokenizer: ReturnType<typeof createTransformersTokenCounter>,
   representative: DiscoveredFile,
+  largeRepresentative: DiscoveredFile,
 ): Promise<LargeRepositoryBenchmarkReport["incrementalFixture"]> {
   const temporary = await mkdtemp(join(dirname(config.paths.applicationStateDir), "mutation-"));
   let store: LanceIndexStore | undefined;
@@ -281,6 +283,19 @@ async function runIncrementalFixture(
     const extension = extname(representative.relativePath) || ".txt";
     const original = join(root, `representative${extension}`);
     await copyFile(representative.canonicalPath, original);
+    const largeExtension = extname(largeRepresentative.relativePath) || ".txt";
+    const largePaths = {
+      start: join(root, `large-start${largeExtension}`),
+      middle: join(root, `large-middle${largeExtension}`),
+      end: join(root, `large-end${largeExtension}`),
+    };
+    await Promise.all(
+      Object.values(largePaths).map((path) => copyFile(largeRepresentative.canonicalPath, path)),
+    );
+    const metadataPaths = Array.from({ length: 16 }, (_, index) =>
+      join(root, `metadata-${String(index).padStart(2, "0")}${extension}`),
+    );
+    await Promise.all(metadataPaths.map((path) => copyFile(representative.canonicalPath, path)));
     const loaded = await loadAppConfig({
       argv: [
         "--root",
@@ -312,6 +327,45 @@ async function runIncrementalFixture(
     const initial = expectOk(await discovery.scanner.scan("scan"));
     expectOk(await indexing.indexFiles(initial.files));
 
+    const chunkVersion = async () => {
+      const connection = await lancedb.connect(fixtureConfig.paths.lanceDbDir);
+      const chunks = await connection.openTable(CHUNKS_TABLE);
+      const version = await chunks.version();
+      chunks.close();
+      connection.close();
+      return version;
+    };
+    const metadataVersionBefore = await chunkVersion();
+    const touchedAt = new Date(Date.now() + 5_000);
+    await Promise.all(metadataPaths.map((path) => utimes(path, touchedAt, touchedAt)));
+    const metadataOnly = await measure(async () => {
+      const scan = expectOk(await discovery.scanner.scan("reconcile"));
+      return expectOk(await indexing.applyChanges(scan.changes));
+    });
+    const metadataVersionAfter = await chunkVersion();
+
+    const largeContent = await readFile(largeRepresentative.canonicalPath, "utf8");
+    const middleOffset = largeContent.indexOf("\n", Math.floor(largeContent.length / 2));
+    const editOne = async (path: string, content: string) => {
+      const pending = `${path}.pending`;
+      await writeFile(pending, content);
+      await rename(pending, path);
+      return measure(async () => {
+        const scan = expectOk(await discovery.scanner.scan("reconcile"));
+        return expectOk(await indexing.applyChanges(scan.changes));
+      });
+    };
+    const startEdit = await editOne(
+      largePaths.start,
+      `Plan 13 start edit marker.\n${largeContent}`,
+    );
+    const split = middleOffset < 0 ? Math.floor(largeContent.length / 2) : middleOffset + 1;
+    const middleEdit = await editOne(
+      largePaths.middle,
+      `${largeContent.slice(0, split)}Plan 13 middle edit marker.\n${largeContent.slice(split)}`,
+    );
+    const endEdit = await editOne(largePaths.end, `${largeContent}\nPlan 13 end edit marker.\n`);
+
     const content = await readFile(original, "utf8");
     const pending = `${original}.pending`;
     await writeFile(pending, `${content}\nPlan 11 incremental benchmark marker.\n`);
@@ -341,6 +395,30 @@ async function runIncrementalFixture(
       updateMs: update.elapsedMs,
       deleteMs: deletion.elapsedMs,
       renameMs: renameResult.elapsedMs,
+      metadataOnlyMass: {
+        fileCount: metadataPaths.length,
+        wallMs: metadataOnly.elapsedMs,
+        embeddedChunks: metadataOnly.value.progress.embeddedChunks,
+        chunksVersionUnchanged: metadataVersionBefore === metadataVersionAfter,
+      },
+      largeFileEdits: {
+        fileBytes: largeRepresentative.fingerprint.size,
+        start: {
+          wallMs: startEdit.elapsedMs,
+          embeddedChunks: startEdit.value.progress.embeddedChunks,
+          reusedChunks: startEdit.value.progress.reusedChunks,
+        },
+        middle: {
+          wallMs: middleEdit.elapsedMs,
+          embeddedChunks: middleEdit.value.progress.embeddedChunks,
+          reusedChunks: middleEdit.value.progress.reusedChunks,
+        },
+        end: {
+          wallMs: endEdit.elapsedMs,
+          embeddedChunks: endEdit.value.progress.embeddedChunks,
+          reusedChunks: endEdit.value.progress.reusedChunks,
+        },
+      },
     };
   } finally {
     store?.close();
@@ -465,15 +543,19 @@ export async function runLargeRepositoryBenchmark(
         )
       : null;
     const viewer = await measureViewer(config, discovery.manifest, initialScan.value.files);
-    const representative = initialScan.value.files
+    const representatives = initialScan.value.files
       .filter((file) => file.readStatus === "ready" && file.fingerprint.size > 0)
-      .toSorted((left, right) => left.fingerprint.size - right.fingerprint.size)[0];
-    if (!representative) throw new Error("No supported file is available for incremental timing.");
+      .toSorted((left, right) => left.fingerprint.size - right.fingerprint.size);
+    const representative = representatives[0];
+    const largeRepresentative = representatives.at(-1);
+    if (!representative || !largeRepresentative)
+      throw new Error("No supported file is available for incremental timing.");
     const incrementalFixture = await runIncrementalFixture(
       config,
       embeddings,
       tokenizerLoad.value,
       representative,
+      largeRepresentative,
     );
     const peakRssBytes = memory.stop();
     const gitStatusAfter = await gitValue(canonicalRoot, [

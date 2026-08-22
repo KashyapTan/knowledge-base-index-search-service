@@ -54,6 +54,26 @@ describe("structure-aware chunking", () => {
     }
   });
 
+  test("uses a bounded cached-count fallback without changing chunk boundaries", () => {
+    const document = extractText(
+      "cached.txt",
+      "text",
+      Array.from({ length: 220 }, (_, index) => `unicode-${index}-λ`).join(" "),
+    );
+    const calls = new Map<string, number>();
+    const counted = {
+      count(text: string) {
+        calls.set(text, (calls.get(text) ?? 0) + 1);
+        return tokenizer.count(text);
+      },
+    };
+    const cached = chunkDocument(document, options({ tokenizer: counted }));
+    const reference = chunkDocument(document, options());
+    expect(cached).toEqual(reference);
+    expect(Math.max(...calls.values())).toBe(1);
+    expect(cached.every((chunk) => chunk.tokenCount <= 52)).toBe(true);
+  });
+
   test("splits a large code declaration without losing symbol context", () => {
     const body = Array.from(
       { length: 120 },
@@ -98,6 +118,38 @@ describe("structure-aware chunking", () => {
         expect(chunk.endOffset).toBeGreaterThanOrEqual(chunk.startOffset);
         expect(chunk.endOffset).toBeLessThanOrEqual(text.length);
         expect(chunk.tokenCount).toBe(tokenizer.count(chunk.searchText));
+      }
+    }
+  });
+
+  test("preserves deterministic token and navigation invariants across every format family", () => {
+    const cases = [
+      ["sample.md", "markdown", "# Héading λ\n\nParagraph with Unicode 🚀."],
+      ["sample.html", "html", "<h1>Héading</h1><p>Visible λ text</p>"],
+      ["sample.py", "python", "def retry(value):\n    return value + 1\n"],
+      ["sample.js", "javascript", "export function retry(v) { return v + 1; }"],
+      ["sample.ts", "typescript", "export const retry = (v: number) => v + 1;"],
+      ["sample.json", "json", '{"retry":{"count":3}}'],
+      ["sample.yaml", "yaml", "retry:\n  count: 3\n"],
+      ["sample.toml", "toml", "[retry]\ncount = 3\n"],
+      ["sample.css", "stylesheet", ".retry { color: red; }"],
+      ["sample.sh", "shell", "retry() { echo retry; }"],
+      ["sample.sql", "sql", "CREATE TABLE retry (count INTEGER);"],
+      ["sample.xml", "xml", "<retry><count>3</count></retry>"],
+      ["sample.csv", "csv", "name,count\nretry,3\n"],
+      ["sample.log", "text", "retry count λ 3\nmalformed \ud800 input"],
+    ] as const;
+    for (const [path, format, text] of cases) {
+      const document = extractText(path, format, text);
+      const first = chunkDocument(document, options());
+      expect(first).toEqual(chunkDocument(document, options()));
+      for (const chunk of first) {
+        expect(chunk.tokenCount).toBeLessThanOrEqual(64);
+        expect(chunk.startLine).toBeGreaterThanOrEqual(1);
+        expect(chunk.endLine).toBeGreaterThanOrEqual(chunk.startLine);
+        expect(chunk.startOffset).toBeGreaterThanOrEqual(0);
+        expect(chunk.endOffset).toBeGreaterThanOrEqual(chunk.startOffset);
+        expect(chunk.endOffset).toBeLessThanOrEqual(text.length);
       }
     }
   });

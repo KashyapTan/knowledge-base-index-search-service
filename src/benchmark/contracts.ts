@@ -119,6 +119,30 @@ export interface LargeRepositoryBenchmarkReport {
     readonly updateMs: number;
     readonly deleteMs: number;
     readonly renameMs: number;
+    readonly metadataOnlyMass?: {
+      readonly fileCount: number;
+      readonly wallMs: number;
+      readonly embeddedChunks: number;
+      readonly chunksVersionUnchanged: boolean;
+    };
+    readonly largeFileEdits?: {
+      readonly fileBytes: number;
+      readonly start: {
+        readonly wallMs: number;
+        readonly embeddedChunks: number;
+        readonly reusedChunks: number;
+      };
+      readonly middle: {
+        readonly wallMs: number;
+        readonly embeddedChunks: number;
+        readonly reusedChunks: number;
+      };
+      readonly end: {
+        readonly wallMs: number;
+        readonly embeddedChunks: number;
+        readonly reusedChunks: number;
+      };
+    };
   };
   readonly relevance: RelevanceEvaluationReport | null;
 }

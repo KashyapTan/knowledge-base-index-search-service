@@ -9,6 +9,7 @@ import type {
   IndexedFileRecord,
   IndexStore,
   IndexStoreError,
+  ReusableChunkRecord,
 } from "./contracts.ts";
 
 export const FILES_TABLE = "files";
@@ -53,6 +54,16 @@ export function createChunksSchema(vectorDimension: number): Schema {
     required("ordinal", new Int32()),
     required("display_text", new Utf8()),
     required("search_text", new Utf8()),
+    required("embedding_input_hash", new Utf8()),
+    required("embedding_input_version", new Int32()),
+    required("embedding_model_id", new Utf8()),
+    required("embedding_revision", new Utf8()),
+    required("embedding_profile_version", new Int32()),
+    required("embedding_dimension", new Int32()),
+    required("pooling_version", new Int32()),
+    required("document_encoding_version", new Int32()),
+    required("tokenizer_version", new Int32()),
+    required("normalization", new Utf8()),
     required("vector", new FixedSizeList(vectorDimension, required("item", new Float32()))),
     required("start_line", new Int32()),
     required("end_line", new Int32()),
@@ -117,7 +128,18 @@ function chunkToRow(chunk: IndexedChunkRecord): Record<string, unknown> {
     ordinal: chunk.ordinal,
     display_text: chunk.displayText,
     search_text: chunk.searchText,
-    vector: [...chunk.vector],
+    embedding_input_hash: chunk.embeddingInputHash,
+    embedding_input_version: chunk.embeddingInputVersion,
+    embedding_model_id: chunk.embeddingModelId,
+    embedding_revision: chunk.embeddingRevision,
+    embedding_profile_version: chunk.embeddingProfileVersion,
+    embedding_dimension: chunk.embeddingDimension,
+    pooling_version: chunk.poolingVersion,
+    document_encoding_version: chunk.documentEncodingVersion,
+    tokenizer_version: chunk.tokenizerVersion,
+    normalization: chunk.normalization,
+    // LanceDB/Arrow accepts typed views directly; keep Worker-owned vector storage typed.
+    vector: chunk.vector,
     start_line: chunk.startLine,
     end_line: chunk.endLine,
     start_offset: chunk.startOffset,
@@ -173,10 +195,10 @@ function toFile(row: Record<string, unknown>): IndexedFileRecord {
 function toChunk(row: Record<string, unknown>): IndexedChunkRecord {
   const vectorValue = row.vector;
   const vector = Array.isArray(vectorValue)
-    ? vectorValue.map(Number)
+    ? Float32Array.from(vectorValue, Number)
     : vectorValue && typeof vectorValue === "object" && Symbol.iterator in vectorValue
-      ? Array.from(vectorValue as Iterable<unknown>, Number)
-      : [];
+      ? Float32Array.from(vectorValue as Iterable<number>)
+      : new Float32Array();
   const headingTrail = parseStringArray(row.heading_trail);
   const symbols = parseStringArray(row.symbols);
   return {
@@ -188,6 +210,16 @@ function toChunk(row: Record<string, unknown>): IndexedChunkRecord {
     ordinal: Number(row.ordinal),
     displayText: String(row.display_text),
     searchText: String(row.search_text),
+    embeddingInputHash: String(row.embedding_input_hash),
+    embeddingInputVersion: Number(row.embedding_input_version),
+    embeddingModelId: String(row.embedding_model_id),
+    embeddingRevision: String(row.embedding_revision),
+    embeddingProfileVersion: Number(row.embedding_profile_version),
+    embeddingDimension: Number(row.embedding_dimension),
+    poolingVersion: Number(row.pooling_version),
+    documentEncodingVersion: Number(row.document_encoding_version),
+    tokenizerVersion: Number(row.tokenizer_version),
+    normalization: row.normalization === "l2" ? "l2" : "l2",
     vector,
     startLine: Number(row.start_line),
     endLine: Number(row.end_line),
@@ -203,6 +235,32 @@ function toChunk(row: Record<string, unknown>): IndexedChunkRecord {
     extractorVersion: Number(row.extractor_version),
     chunkerVersion: Number(row.chunker_version),
     indexSchemaVersion: Number(row.index_schema_version),
+  };
+}
+
+function toReusableChunk(row: Record<string, unknown>): ReusableChunkRecord {
+  const value = row.vector;
+  const vector =
+    value && typeof value === "object" && Symbol.iterator in value
+      ? Float32Array.from(value as Iterable<number>)
+      : new Float32Array();
+  return {
+    chunkId: String(row.chunk_id),
+    fileId: String(row.file_id),
+    embeddingInputHash: String(row.embedding_input_hash),
+    embeddingInputVersion: Number(row.embedding_input_version),
+    embeddingModelId: String(row.embedding_model_id),
+    embeddingRevision: String(row.embedding_revision),
+    embeddingProfileVersion: Number(row.embedding_profile_version),
+    embeddingDimension: Number(row.embedding_dimension),
+    poolingVersion: Number(row.pooling_version),
+    documentEncodingVersion: Number(row.document_encoding_version),
+    tokenizerVersion: Number(row.tokenizer_version),
+    normalization: String(row.normalization),
+    extractorVersion: Number(row.extractor_version),
+    chunkerVersion: Number(row.chunker_version),
+    indexSchemaVersion: Number(row.index_schema_version),
+    vector,
   };
 }
 
@@ -223,6 +281,8 @@ export interface OpenLanceIndexOptions {
   readonly annThreshold?: number;
   /** Deterministic crash-boundary injection for integration tests. */
   readonly beforeFileCommit?: () => Promise<void>;
+  /** Maximum IDs in one safely escaped IN predicate; bounded independently from pipeline windows. */
+  readonly idBatchSize?: number;
 }
 
 export class LanceIndexStore implements IndexStore {
@@ -232,6 +292,7 @@ export class LanceIndexStore implements IndexStore {
   readonly #config: AppConfig;
   readonly #annThreshold: number;
   readonly #beforeFileCommit: (() => Promise<void>) | undefined;
+  readonly #idBatchSize: number;
 
   private constructor(
     connection: lancedb.Connection,
@@ -240,6 +301,7 @@ export class LanceIndexStore implements IndexStore {
     config: AppConfig,
     annThreshold: number,
     beforeFileCommit: (() => Promise<void>) | undefined,
+    idBatchSize: number,
   ) {
     this.#connection = connection;
     this.#files = files;
@@ -247,6 +309,7 @@ export class LanceIndexStore implements IndexStore {
     this.#config = config;
     this.#annThreshold = annThreshold;
     this.#beforeFileCommit = beforeFileCommit;
+    this.#idBatchSize = idBatchSize;
   }
 
   static async open(
@@ -345,6 +408,7 @@ export class LanceIndexStore implements IndexStore {
           config,
           options.annThreshold ?? 50_000,
           options.beforeFileCommit,
+          Math.max(1, Math.min(1_000, options.idBatchSize ?? 128)),
         ),
       );
     } catch {
@@ -365,8 +429,8 @@ export class LanceIndexStore implements IndexStore {
     try {
       const records: IndexedFileRecord[] = [];
       const unique = [...new Set(fileIds)];
-      for (let offset = 0; offset < unique.length; offset += 500) {
-        const batch = unique.slice(offset, offset + 500);
+      for (let offset = 0; offset < unique.length; offset += this.#idBatchSize) {
+        const batch = unique.slice(offset, offset + this.#idBatchSize);
         const rows = (await this.#files
           .query()
           .where(`file_id IN (${batch.map(sqlString).join(", ")})`)
@@ -391,8 +455,8 @@ export class LanceIndexStore implements IndexStore {
     try {
       const records: IndexedChunkRecord[] = [];
       const unique = [...new Set(fileIds)];
-      for (let offset = 0; offset < unique.length; offset += 500) {
-        const batch = unique.slice(offset, offset + 500);
+      for (let offset = 0; offset < unique.length; offset += this.#idBatchSize) {
+        const batch = unique.slice(offset, offset + this.#idBatchSize);
         const rows = (await this.#chunks
           .query()
           .where(`file_id IN (${batch.map(sqlString).join(", ")})`)
@@ -406,6 +470,71 @@ export class LanceIndexStore implements IndexStore {
       );
     } catch {
       return storeFailure("INDEX_READ_FAILED", "The indexed chunk records could not be read.");
+    }
+  }
+
+  async getReusableChunksForFiles(
+    fileIds: readonly string[],
+  ): Promise<Result<readonly ReusableChunkRecord[], IndexStoreError>> {
+    if (fileIds.length === 0) return ok([]);
+    try {
+      const records: ReusableChunkRecord[] = [];
+      const unique = [...new Set(fileIds)];
+      const projection = [
+        "chunk_id",
+        "file_id",
+        "embedding_input_hash",
+        "embedding_input_version",
+        "embedding_model_id",
+        "embedding_revision",
+        "embedding_profile_version",
+        "embedding_dimension",
+        "pooling_version",
+        "document_encoding_version",
+        "tokenizer_version",
+        "normalization",
+        "extractor_version",
+        "chunker_version",
+        "index_schema_version",
+        "vector",
+      ];
+      for (let offset = 0; offset < unique.length; offset += this.#idBatchSize) {
+        const batch = unique.slice(offset, offset + this.#idBatchSize);
+        const rows = (await this.#chunks
+          .query()
+          .select(projection)
+          .where(`file_id IN (${batch.map(sqlString).join(", ")})`)
+          .toArray()) as Record<string, unknown>[];
+        records.push(...rows.map(toReusableChunk));
+      }
+      return ok(
+        records.sort(
+          (left, right) =>
+            left.fileId.localeCompare(right.fileId) || left.chunkId.localeCompare(right.chunkId),
+        ),
+      );
+    } catch {
+      return storeFailure("INDEX_READ_FAILED", "Reusable chunk vectors could not be read.");
+    }
+  }
+
+  async updateFiles(files: readonly IndexedFileRecord[]): Promise<Result<void, IndexStoreError>> {
+    if (files.length === 0) return ok(undefined);
+    if (new Set(files.map((file) => file.fileId)).size !== files.length) {
+      return storeFailure(
+        "INDEX_SCHEMA_INVALID",
+        "Every metadata update must have a unique file ID.",
+      );
+    }
+    try {
+      await this.#files
+        .mergeInsert("file_id")
+        .whenMatchedUpdateAll()
+        .whenNotMatchedInsertAll()
+        .execute(files.map(fileToRow));
+      return ok(undefined);
+    } catch {
+      return storeFailure("INDEX_WRITE_FAILED", "File metadata could not be committed.");
     }
   }
 
@@ -434,7 +563,9 @@ export class LanceIndexStore implements IndexStore {
         entry.chunks.some(
           (chunk) =>
             chunk.fileId !== entry.file.fileId ||
-            chunk.vector.length !== this.#config.embedding.vectorDimension,
+            chunk.vector.length !== this.#config.embedding.vectorDimension ||
+            chunk.embeddingDimension !== this.#config.embedding.vectorDimension ||
+            chunk.vector.some((value) => !Number.isFinite(value)),
         ),
       )
     ) {

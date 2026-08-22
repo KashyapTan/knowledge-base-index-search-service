@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import * as lancedb from "@lancedb/lancedb";
 import type { EmbeddingVector, IndexedChunkRecord, IndexedFileRecord } from "./contracts.ts";
-import { CHUNKS_TABLE, openLanceIndex } from "./lance-store.ts";
+import { CHUNKS_TABLE, FILES_TABLE, openLanceIndex } from "./lance-store.ts";
 import { indexableFile, indexingConfig } from "./test-helpers.ts";
 
 let fixture = "";
@@ -61,6 +61,16 @@ function chunkRecord(
     ordinal: 0,
     displayText: text,
     searchText: `Path: docs/one.md\n${text}`,
+    embeddingInputHash: `input-${chunkId}`,
+    embeddingInputVersion: 1,
+    embeddingModelId: "Xenova/bge-small-en-v1.5",
+    embeddingRevision: "ea104dacec62c0de699686887e3f920caeb4f3e3",
+    embeddingProfileVersion: 2,
+    embeddingDimension: 4,
+    poolingVersion: 1,
+    documentEncodingVersion: 1,
+    tokenizerVersion: 1,
+    normalization: "l2",
     vector,
     startLine: 1,
     endLine: 1,
@@ -100,13 +110,18 @@ describe("LanceDB index storage", () => {
     if (chunks.ok) {
       expect(chunks.value).toHaveLength(1);
       expect(chunks.value[0]?.headingTrail).toEqual(["Docs"]);
-      expect(chunks.value[0]?.vector).toEqual([1, 0, 0, 0]);
+      expect(chunks.value[0]?.vector).toEqual(Float32Array.from([1, 0, 0, 0]));
     }
     const invalid = await opened.value.replaceFile(fileRecord(), [
       chunkRecord("wrong", "wrong", [1, 0]),
     ]);
     expect(invalid.ok).toBe(false);
     if (!invalid.ok) expect(invalid.error.code).toBe("INDEX_SCHEMA_INVALID");
+    const nonFinite = await opened.value.replaceFile(fileRecord(), [
+      chunkRecord("non-finite", "non-finite", Float32Array.from([1, 0, Number.NaN, 0])),
+    ]);
+    expect(nonFinite.ok).toBe(false);
+    if (!nonFinite.ok) expect(nonFinite.error.code).toBe("INDEX_SCHEMA_INVALID");
     opened.value.close();
     expect(await Bun.file(config.paths.compatibilityFile).exists()).toBe(true);
   });
@@ -200,6 +215,68 @@ describe("LanceDB index storage", () => {
         ])
       ).ok,
     ).toBe(false);
+    opened.value.close();
+  });
+
+  test("projects only reusable vector identity and updates file metadata without mutating chunks", async () => {
+    const config = indexingConfig(
+      join(fixture, "root"),
+      join(fixture, "state"),
+      join(fixture, "cache"),
+    );
+    const opened = await openLanceIndex(config, { idBatchSize: 1 });
+    if (!opened.ok) throw new Error(opened.error.message);
+    expect(await opened.value.replaceFile(fileRecord(), [chunkRecord()])).toEqual({
+      ok: true,
+      value: undefined,
+    });
+    const projected = await opened.value.getReusableChunksForFiles(["file-1"]);
+    expect(projected.ok).toBe(true);
+    if (projected.ok) {
+      expect(projected.value).toHaveLength(1);
+      expect(projected.value[0]?.vector).toBeInstanceOf(Float32Array);
+      expect(Object.keys(projected.value[0] ?? {}).sort()).toEqual(
+        [
+          "chunkId",
+          "fileId",
+          "embeddingInputHash",
+          "embeddingInputVersion",
+          "embeddingModelId",
+          "embeddingRevision",
+          "embeddingProfileVersion",
+          "embeddingDimension",
+          "poolingVersion",
+          "documentEncodingVersion",
+          "tokenizerVersion",
+          "normalization",
+          "extractorVersion",
+          "chunkerVersion",
+          "indexSchemaVersion",
+          "vector",
+        ].sort(),
+      );
+    }
+
+    const versions = async () => {
+      const connection = await lancedb.connect(config.paths.lanceDbDir);
+      const files = await connection.openTable(FILES_TABLE);
+      const chunks = await connection.openTable(CHUNKS_TABLE);
+      const value = { files: await files.version(), chunks: await chunks.version() };
+      files.close();
+      chunks.close();
+      connection.close();
+      return value;
+    };
+    const before = await versions();
+    expect(
+      await opened.value.updateFiles([
+        { ...fileRecord(), modifiedAtMs: 99, modifiedAtNs: "99000000", indexedAtMs: 100 },
+      ]),
+    ).toEqual({ ok: true, value: undefined });
+    const after = await versions();
+    expect(after.files).toBeGreaterThan(before.files);
+    expect(after.chunks).toBe(before.chunks);
+    expect((await opened.value.getFile("file-1")).ok).toBe(true);
     opened.value.close();
   });
 

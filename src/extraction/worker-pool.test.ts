@@ -130,7 +130,7 @@ describe("worker extraction pool", () => {
     expect((await pool.process(files[0] as DiscoveredFile)).ok).toBe(false);
   });
 
-  test("fails closed when initialization fails or the bounded queue is full", async () => {
+  test("fails closed on initialization and backpressures or cancels a full bounded queue", async () => {
     const state = { active: 0, maxActive: 0 };
     const failed = new WorkerExtractionPool(config(), 512, {
       workerFactory: () => new FixtureWorker(state, { failInitialization: true }),
@@ -145,12 +145,21 @@ describe("worker extraction pool", () => {
       workerFactory: () => new FixtureWorker(state),
     });
     const first = bounded.process(indexableFile("first.md", "first"));
-    const overflow = await bounded.process(indexableFile("overflow.md", "overflow"));
-    expect(overflow).toMatchObject({
-      ok: false,
-      error: { message: expect.stringContaining("full") },
-    });
+    const backpressured = bounded.process(indexableFile("backpressured.md", "backpressured"));
     expect((await first).ok).toBe(true);
+    expect((await backpressured).ok).toBe(true);
+
+    const active = bounded.process(indexableFile("active.md", "active"));
+    const controller = new AbortController();
+    const cancelled = bounded.process(indexableFile("cancelled.md", "cancelled"), {
+      signal: controller.signal,
+    });
+    controller.abort();
+    expect(await cancelled).toMatchObject({
+      ok: false,
+      error: { message: expect.stringContaining("cancelled") },
+    });
+    expect((await active).ok).toBe(true);
     await bounded.shutdown();
 
     const composed = createWorkerExtractionPipeline(config(), 512, {

@@ -44,10 +44,18 @@ describe("Plan 11 release evidence", () => {
         },
       },
       indexing: { failedFiles: 2, noChangeFiles: 99 },
+      incrementalFixture: {
+        metadataOnlyMass: { embeddedChunks: 1, chunksVersionUnchanged: false },
+        largeFileEdits: {
+          start: { embeddedChunks: 0, reusedChunks: 0 },
+          middle: { embeddedChunks: 1, reusedChunks: 0 },
+          end: { embeddedChunks: 1, reusedChunks: 1 },
+        },
+      },
       queries: [{ totalMs: { p95: 6_000 } }],
       viewer: { smallOpenMs: 0, largeOpenMs: 3_000, smallGrepMs: 0, largeGrepMs: 3_000 },
     } as unknown as LargeRepositoryBenchmarkReport;
-    expect(validateLargeBenchmarkEvidence(large, thresholds)).toHaveLength(6);
+    expect(validateLargeBenchmarkEvidence(large, thresholds)).toHaveLength(8);
   });
 
   test("accepts complete evidence and rejects incomparable or ungrounded model decisions", () => {
@@ -61,6 +69,29 @@ describe("Plan 11 release evidence", () => {
       report: { metrics: { recallAt5: 1, recallAt10: 1, meanReciprocalRank: 1 } },
     } as ControlledEvaluationRun;
     expect(validateControlledReleaseEvidence(controlled, thresholds)).toEqual([]);
+
+    const large = {
+      corpus: {
+        supportedFileCount: 2,
+        readOnlyVerification: {
+          stateOutsideSource: true,
+          outputOutsideSource: true,
+          gitStatusUnchanged: true,
+        },
+      },
+      indexing: { failedFiles: 0, noChangeFiles: 2 },
+      incrementalFixture: {
+        metadataOnlyMass: { embeddedChunks: 0, chunksVersionUnchanged: true },
+        largeFileEdits: {
+          start: { embeddedChunks: 1, reusedChunks: 3 },
+          middle: { embeddedChunks: 1, reusedChunks: 3 },
+          end: { embeddedChunks: 1, reusedChunks: 3 },
+        },
+      },
+      queries: [{ totalMs: { p95: 1 } }],
+      viewer: { smallOpenMs: 1, largeOpenMs: 1, smallGrepMs: 1, largeGrepMs: 1 },
+    } as unknown as LargeRepositoryBenchmarkReport;
+    expect(validateLargeBenchmarkEvidence(large, thresholds)).toEqual([]);
 
     const comparison = {
       identicalSettings: false,

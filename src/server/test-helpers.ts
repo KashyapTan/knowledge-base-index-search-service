@@ -181,6 +181,12 @@ export class FixtureStore implements IndexStore {
   async getChunksForFiles() {
     return ok([] as IndexedChunkRecord[]);
   }
+  async getReusableChunksForFiles() {
+    return ok([]);
+  }
+  async updateFiles() {
+    return ok(undefined);
+  }
   async replaceFile(_file: IndexedFileRecord, _chunks: readonly IndexedChunkRecord[]) {
     return ok(undefined);
   }
